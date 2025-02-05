@@ -165,7 +165,7 @@ func (l *Lexer) readString() (string, error) {
 			return "", fmt.Errorf("EOF in string constant")
 		}
 		if l.char == '\n' {
-			return "", fmt.Errorf("unterminitaed string constant")
+			return "", fmt.Errorf("unterminated string constant")
 		}
 
 		if l.char == '\\' {
@@ -247,24 +247,25 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = TIMES
 		tok.Literal = "*"
 		l.readChar()
-	// This could be a comment or a subtraction
-	// TODO: add support for Multi line comment
 	case l.char == '-':
-		if l.peekChar() == '-' {
+		tok.Type = MINUS
+		tok.Literal = "-"
+		l.readChar()
+	// This could be a comment or a divide
+	// TODO: add support for Multi line comment
+	case l.char == '/':
+		if l.peekChar() == '/' {
 			// This is a single line comment
 			for l.char != '\n' && l.char != 0 {
 				l.readChar()
 			}
 			return l.NextToken() // Skip the comment and get the next token
 		} else {
-			tok.Type = MINUS
-			tok.Literal = "-"
+			tok.Type = DIVIDE
+			tok.Literal = "/"
 			l.readChar()
 		}
-	case l.char == '/':
-		tok.Type = DIVIDE
-		tok.Literal = "/"
-		l.readChar()
+
 	case l.char == '~':
 		tok.Type = NEG
 		tok.Literal = "~"

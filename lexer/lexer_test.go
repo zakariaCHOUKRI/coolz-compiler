@@ -17,7 +17,7 @@ func TestNextToken(t *testing.T) {
 			[]string{"class", "Main", "{", "}", ";", ""},
 		},
 		{
-			"x <- true;-- One line comment\nx <- false;",
+			"x <- true;// One line comment\nx <- false;",
 			[]TokenType{OBJECTID, ASSIGN, BOOL_CONST, SEMI, OBJECTID, ASSIGN, BOOL_CONST, SEMI, EOF},
 			[]string{"x", "<-", "true", ";", "x", "<-", "false", ";", ""},
 		},
