@@ -5,6 +5,7 @@ import (
 	"coolz-compiler/lexer"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newParserFromInput(input string) *Parser {
@@ -196,7 +197,7 @@ func TestAttributeParsing(t *testing.T) {
 	}
 }
 
-func TestExpressionParssing(t *testing.T) {
+func TestExpressionParsing(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -216,22 +217,39 @@ func TestExpressionParssing(t *testing.T) {
 		{"isvoid 1", "isvoid 1"},
 		{"1 / 2", "(1 / 2)"},
 		// TODO: Implement parenthesis parsing
-		// {"(1 + 2)", "(1 + 2)"},
+		{"(1 + 2)", "(1 + 2)"},
 		{"new Object", "new Object"},
 		{"x <- 5", "(x <- 5)"},                                   // 15
 		{"if true then 1 else 2 fi", "if true then 1 else 2 fi"}, // 16
 		{"while true loop 1 pool", "while true loop 1 pool"},     // 17
+		{"1 + 2 * 3", "(1 + (2 * 3))"},
+		{"1 * 2 + 3", "((1 * 2) + 3)"},
+		{"x.foo()", "((x . foo))"},
+		{"x.foo(1,2)", "((x . foo))"}, // arguments not printed in this example
 	}
 
 	for i, tt := range tests {
-		p := newParserFromInput(tt.input)
-		checkParserErrors(t, p, i)
+		done := make(chan bool)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("test [%d] panicked: %v", i, r)
+				}
+				done <- true
+			}()
+			p := newParserFromInput(tt.input)
+			checkParserErrors(t, p, i)
 
-		expression := p.parseExpression(LOWEST)
-		actual := SerializeExpression(expression)
-		if actual != tt.expected {
-			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+			expression := p.parseExpression(LOWEST)
+			actual := SerializeExpression(expression)
+			if actual != tt.expected {
+				t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+			}
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Errorf("test [%d] timed out", i)
 		}
 	}
-
 }

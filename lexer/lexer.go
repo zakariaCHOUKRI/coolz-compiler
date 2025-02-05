@@ -124,11 +124,43 @@ func (l *Lexer) peekChar() rune {
 	return char
 }
 
-// skipWhiteSpace whitespace characters.
+// skipWhiteSpace skips whitespace characters and comments.
 func (l *Lexer) skipWhiteSpace() {
-	for unicode.IsSpace(l.char) {
-		l.readChar()
+	for unicode.IsSpace(l.char) || l.char == '-' || l.char == '(' {
+		if l.char == '-' && l.peekChar() == '-' {
+			// Single line comment
+			for l.char != '\n' && l.char != 0 {
+				l.readChar()
+			}
+		} else if l.char == '(' && l.peekChar() == '*' {
+			// Multi-line comment
+			l.readChar() // consume '('
+			l.readChar() // consume '*'
+			l.skipMultiLineComment()
+		} else if unicode.IsSpace(l.char) {
+			l.readChar()
+		} else {
+			break
+		}
 	}
+}
+
+// skipMultiLineComment skips over multi-line comments, handling nested comments.
+func (l *Lexer) skipMultiLineComment() {
+	nesting := 1
+	for nesting > 0 {
+		l.readChar()
+		if l.char == 0 {
+			return // EOF
+		} else if l.char == '(' && l.peekChar() == '*' {
+			nesting++
+			l.readChar() // consume '*'
+		} else if l.char == '*' && l.peekChar() == ')' {
+			nesting--
+			l.readChar() // consume ')'
+		}
+	}
+	l.readChar() // consume the final ')'
 }
 
 func (l *Lexer) readNumber() string {
@@ -247,25 +279,15 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = TIMES
 		tok.Literal = "*"
 		l.readChar()
+	// This could be a comment or a subtraction
 	case l.char == '-':
 		tok.Type = MINUS
 		tok.Literal = "-"
 		l.readChar()
-	// This could be a comment or a divide
-	// TODO: add support for Multi line comment
 	case l.char == '/':
-		if l.peekChar() == '/' {
-			// This is a single line comment
-			for l.char != '\n' && l.char != 0 {
-				l.readChar()
-			}
-			return l.NextToken() // Skip the comment and get the next token
-		} else {
-			tok.Type = DIVIDE
-			tok.Literal = "/"
-			l.readChar()
-		}
-
+		tok.Type = DIVIDE
+		tok.Literal = "/"
+		l.readChar()
 	case l.char == '~':
 		tok.Type = NEG
 		tok.Literal = "~"

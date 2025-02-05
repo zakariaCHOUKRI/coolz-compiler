@@ -7,23 +7,60 @@ import (
 )
 
 func SerializeExpression(exp ast.Expression) string {
+	if exp == nil {
+		return "<nil>"
+	}
+
 	switch node := exp.(type) {
-	case *ast.IntegerLiteral:
-		return fmt.Sprintf("%d", node.Value)
-	case *ast.StringLiteral:
-		return fmt.Sprintf("%q", node.Value)
-	case *ast.BooleanLiteral:
-		return fmt.Sprintf("%t", node.Value)
 	case *ast.ObjectIdentifier:
 		return node.Value
+
+	case *ast.IntegerLiteral:
+		return fmt.Sprintf("%d", node.Value)
+
+	case *ast.StringLiteral:
+		return fmt.Sprintf("%q", node.Value)
+
+	case *ast.BooleanLiteral:
+		return fmt.Sprintf("%v", node.Value)
+
 	case *ast.UnaryExpression:
 		return fmt.Sprintf("(%s %s)", node.Operator, SerializeExpression(node.Right))
+
 	case *ast.BinaryExpression:
-		return fmt.Sprintf("(%s %s %s)", SerializeExpression(node.Left), node.Operator, SerializeExpression(node.Right))
+		if node.Operator == "." {
+			return fmt.Sprintf("((%s %s %s))",
+				SerializeExpression(node.Left),
+				node.Operator,
+				SerializeExpression(node.Right))
+		}
+		return fmt.Sprintf("(%s %s %s)",
+			SerializeExpression(node.Left),
+			node.Operator,
+			SerializeExpression(node.Right))
+
+	case *ast.AssignExpression:
+		return fmt.Sprintf("(%s <- %s)",
+			SerializeExpression(node.Left),
+			SerializeExpression(node.Right))
+
+	case *ast.IsVoidExpression:
+		return fmt.Sprintf("isvoid %s", SerializeExpression(node.Expression))
+
+	case *ast.NewExpression:
+		return fmt.Sprintf("new %s", node.Type.Value)
+
 	case *ast.IfExpression:
-		return fmt.Sprintf("if %s then %s else %s fi", SerializeExpression(node.Condition), SerializeExpression(node.Consequence), SerializeExpression(node.Alternative))
+		return fmt.Sprintf("if %s then %s else %s fi",
+			SerializeExpression(node.Condition),
+			SerializeExpression(node.Consequence),
+			SerializeExpression(node.Alternative))
+
 	case *ast.WhileExpression:
-		return fmt.Sprintf("while %s loop %s pool", SerializeExpression(node.Condition), SerializeExpression(node.Body))
+		return fmt.Sprintf("while %s loop %s pool",
+			SerializeExpression(node.Condition),
+			SerializeExpression(node.Body))
+
 	case *ast.BlockExpression:
 		var sb strings.Builder
 		sb.WriteString("{ ")
@@ -35,6 +72,7 @@ func SerializeExpression(exp ast.Expression) string {
 		}
 		sb.WriteString(" }")
 		return sb.String()
+
 	case *ast.LetExpression:
 		var sb strings.Builder
 		sb.WriteString("let ")
@@ -53,11 +91,8 @@ func SerializeExpression(exp ast.Expression) string {
 		sb.WriteString(" in ")
 		sb.WriteString(SerializeExpression(node.In))
 		return sb.String()
-	case *ast.NewExpression:
-		return fmt.Sprintf("new %s", node.Type.Value)
-	case *ast.IsVoidExpression:
-		return fmt.Sprintf("isvoid %s", SerializeExpression(node.Expression))
+
 	default:
-		return fmt.Sprintf("%t", node)
+		return fmt.Sprintf("%T", exp)
 	}
 }

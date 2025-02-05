@@ -189,3 +189,14 @@ type IsVoidExpression struct {
 
 func (ive *IsVoidExpression) expressionNode()      {}
 func (ive *IsVoidExpression) TokenLiteral() string { return ive.Token.Literal }
+
+// AssignExpression represents an assignment expression in the AST.
+type AssignExpression struct {
+	Token    lexer.Token // The token.ASSIGN token
+	Left     Expression
+	Operator string
+	Right    Expression
+}
+
+func (ae *AssignExpression) expressionNode()      {}
+func (ae *AssignExpression) TokenLiteral() string { return ae.Token.Literal }

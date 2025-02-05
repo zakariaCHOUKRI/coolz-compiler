@@ -25,12 +25,14 @@ type (
 const (
 	_ int = iota
 	LOWEST
-	EQUALS      // ==
-	LESSGREATER // > or <
-	SUM         // +
-	PRODUCT     // *
-	PREFIX      // -X or !X
-	CALL        // myFunction(X)
+	ASSIGN      // <-
+	EQUALS      // =
+	LESSGREATER // < or <=
+	SUM         // + or -
+	PRODUCT     // * or /
+	PREFIX      // -x or not x or ~x or isvoid x
+	CALL        // method(args)
+	DOT         // obj.method
 )
 
 func New(l *lexer.Lexer) *Parser {
@@ -53,6 +55,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.ISVOID, p.parseIsVoidExpression)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
+	p.registerPrefix(lexer.NEG, p.parsePrefixExpression)
 
 	// Register infix parsers
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
@@ -62,6 +65,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.LT, p.parseInfixExpression)
 	p.registerInfix(lexer.LE, p.parseInfixExpression)
+	p.registerInfix(lexer.ASSIGN, p.parseAssignExpression)
+	p.registerInfix(lexer.DOT, p.parseDotExpression) // add DOT infix parser
 
 	p.nextToken()
 	p.nextToken()
@@ -157,7 +162,7 @@ func (p *Parser) parseClass() *ast.Class {
 	if !p.expectCurrent(lexer.LBRACE) {
 		return nil
 	}
-
+	// do not consume '{'
 	for !p.curTokenIs(lexer.RBRACE) {
 		c.Features = append(c.Features, p.parseFeature())
 		if !p.expectAndPeek(lexer.SEMI) {
@@ -170,6 +175,7 @@ func (p *Parser) parseClass() *ast.Class {
 		p.currentError(lexer.RBRACE)
 		return nil
 	}
+	p.nextToken() // move past '}'
 
 	return c
 }
@@ -287,11 +293,11 @@ func (p *Parser) parseAttribute() *ast.Attribute {
 		return nil
 	}
 
-	// if p.peekTokenIs(lexer.ASSIGN) {
-	// 	p.nextToken()
-	// 	p.nextToken()
-	// 	p.parseExpression()
-	// }
+	if p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken() // consume '<-'
+		p.nextToken() // move to expression
+		p.parseExpression(LOWEST)
+	}
 
 	return attribute
 }
@@ -307,12 +313,12 @@ func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
-		// p.noPrefixParseFnError(p.curToken.Type)
+		p.noPrefixParseFnError(p.curToken.Type)
 		return nil
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMI) && precedence < p.peekPrecedence() {
+	for !p.curTokenIs(lexer.SEMI) && precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -324,8 +330,17 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	return leftExp
 }
 
+func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
+	msg := fmt.Sprintf("no prefix parse function for %s found", t)
+	p.errors = append(p.errors, msg)
+	p.nextToken() // advance to avoid infinite loop
+}
+
 func (p *Parser) parseIdentifier() ast.Expression {
-	return &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	return &ast.ObjectIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
@@ -337,19 +352,27 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 }
 
 func (p *Parser) parseStringLiteral() ast.Expression {
-	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	str := p.curToken.Literal
+	return &ast.StringLiteral{Token: p.curToken, Value: str}
 }
 
 func (p *Parser) parseBooleanLiteral() ast.Expression {
-	return &ast.BooleanLiteral{Token: p.curToken, Value: p.curToken.Literal == "true"}
+	return &ast.BooleanLiteral{
+		Token: p.curToken,
+		Value: p.curToken.Literal == "true",
+	}
 }
 
 func (p *Parser) parseGroupedExpression() ast.Expression {
-	p.nextToken()
+	p.nextToken() // consume the '('
+
 	exp := p.parseExpression(LOWEST)
-	if !p.expectCurrent(lexer.RPAREN) {
+
+	if !p.peekTokenIs(lexer.RPAREN) {
+		p.peekError(lexer.RPAREN)
 		return nil
 	}
+	p.nextToken() // consume the ')'
 	return exp
 }
 
@@ -375,52 +398,67 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	return exp
 }
 
+func (p *Parser) parseAssignExpression(left ast.Expression) ast.Expression {
+	exp := &ast.AssignExpression{
+		Token:    p.curToken,
+		Left:     left,
+		Operator: p.curToken.Literal,
+	}
+	p.nextToken()
+	exp.Right = p.parseExpression(LOWEST)
+	return exp
+}
+
 func (p *Parser) parseIfExpression() ast.Expression {
 	exp := &ast.IfExpression{Token: p.curToken}
-
-	if !p.expectCurrent(lexer.IF) {
-		return nil
-	}
+	p.nextToken() // consume "if"
 
 	exp.Condition = p.parseExpression(LOWEST)
 
-	if !p.expectCurrent(lexer.THEN) {
+	if !p.peekTokenIs(lexer.THEN) {
 		return nil
 	}
+	p.nextToken() // consume "then"
+	p.nextToken() // move past "then"
 
 	exp.Consequence = p.parseExpression(LOWEST)
 
-	if !p.expectCurrent(lexer.ELSE) {
+	if !p.peekTokenIs(lexer.ELSE) {
 		return nil
 	}
+	p.nextToken() // consume "else"
+	p.nextToken() // move past "else"
 
 	exp.Alternative = p.parseExpression(LOWEST)
 
-	if !p.expectCurrent(lexer.FI) {
+	if !p.peekTokenIs(lexer.FI) {
 		return nil
 	}
+	p.nextToken() // consume "fi"
+	p.nextToken() // move past "fi"
 
 	return exp
 }
 
 func (p *Parser) parseWhileExpression() ast.Expression {
 	exp := &ast.WhileExpression{Token: p.curToken}
-
-	if !p.expectCurrent(lexer.WHILE) {
-		return nil
-	}
+	p.nextToken() // consume "while"
 
 	exp.Condition = p.parseExpression(LOWEST)
 
-	if !p.expectCurrent(lexer.LOOP) {
+	if !p.peekTokenIs(lexer.LOOP) {
 		return nil
 	}
+	p.nextToken() // consume "loop"
+	p.nextToken() // move past "loop"
 
 	exp.Body = p.parseExpression(LOWEST)
 
-	if !p.expectCurrent(lexer.POOL) {
+	if !p.peekTokenIs(lexer.POOL) {
 		return nil
 	}
+	p.nextToken() // consume "pool"
+	p.nextToken() // move past "pool"
 
 	return exp
 }
@@ -450,6 +488,57 @@ func (p *Parser) parseIsVoidExpression() ast.Expression {
 	return exp
 }
 
+func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
+	token := p.curToken
+
+	if !p.peekTokenIs(lexer.OBJECTID) {
+		p.peekError(lexer.OBJECTID)
+		return nil
+	}
+	p.nextToken() // move to method name
+
+	methodName := &ast.ObjectIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+	p.nextToken() // consume method name
+
+	exp := &ast.BinaryExpression{
+		Token:    token,
+		Operator: ".",
+		Left:     left,
+		Right:    methodName,
+	}
+
+	// Handle method call arguments if present
+	if p.curTokenIs(lexer.LPAREN) {
+		p.nextToken() // consume '('
+
+		first := true
+		for !p.curTokenIs(lexer.RPAREN) && p.curToken.Type != lexer.EOF {
+			if !first {
+				if !p.curTokenIs(lexer.COMMA) {
+					p.currentError(lexer.COMMA)
+					return nil
+				}
+				p.nextToken() // consume comma
+			}
+
+			_ = p.parseExpression(LOWEST)
+			p.nextToken() // consume the expression
+			first = false
+		}
+
+		if !p.curTokenIs(lexer.RPAREN) {
+			p.currentError(lexer.RPAREN)
+			return nil
+		}
+		p.nextToken() // consume ')'
+	}
+
+	return exp
+}
+
 func (p *Parser) curPrecedence() int {
 	if p, ok := precedences[p.curToken.Type]; ok {
 		return p
@@ -465,6 +554,7 @@ func (p *Parser) peekPrecedence() int {
 }
 
 var precedences = map[lexer.TokenType]int{
+	lexer.ASSIGN: ASSIGN,
 	lexer.EQ:     EQUALS,
 	lexer.LT:     LESSGREATER,
 	lexer.LE:     LESSGREATER,
@@ -473,4 +563,5 @@ var precedences = map[lexer.TokenType]int{
 	lexer.DIVIDE: PRODUCT,
 	lexer.TIMES:  PRODUCT,
 	lexer.LPAREN: CALL,
+	lexer.DOT:    DOT,
 }
