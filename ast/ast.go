@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"cool-compiler/lexer"
+	"coolz-compiler/lexer"
 )
 
 type Node interface {

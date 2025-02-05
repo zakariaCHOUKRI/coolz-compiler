@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"cool-compiler/ast"
+	"coolz-compiler/ast"
 	"fmt"
 	"strings"
 )

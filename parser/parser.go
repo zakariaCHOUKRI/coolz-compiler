@@ -1,8 +1,8 @@
 package parser
 
 import (
-	"cool-compiler/ast"
-	"cool-compiler/lexer"
+	"coolz-compiler/ast"
+	"coolz-compiler/lexer"
 	"fmt"
 )
 

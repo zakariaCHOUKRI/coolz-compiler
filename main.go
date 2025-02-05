@@ -1,8 +1,8 @@
 package main
 
 import (
-	"cool-compiler/lexer"
-	"cool-compiler/parser"
+	"coolz-compiler/lexer"
+	"coolz-compiler/parser"
 	"flag"
 	"fmt"
 	"os"

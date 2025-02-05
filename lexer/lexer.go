@@ -165,7 +165,7 @@ func (l *Lexer) readString() (string, error) {
 			return "", fmt.Errorf("EOF in string constant")
 		}
 		if l.char == '\n' {
-			return "", fmt.Errorf("Unterminitaed string constant")
+			return "", fmt.Errorf("unterminitaed string constant")
 		}
 
 		if l.char == '\\' {
