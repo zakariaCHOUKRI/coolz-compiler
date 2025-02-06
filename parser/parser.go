@@ -5,6 +5,7 @@ import (
 	"coolz-compiler/lexer"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 type Parser struct {
@@ -87,7 +88,6 @@ func (p *Parser) Errors() []string {
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
-	// fmt.Printf("DEBUG: Advanced tokens - Current: %v, Peek: %v\n", p.curToken.Type, p.peekToken.Type)
 }
 
 func (p *Parser) curTokenIs(t lexer.TokenType) bool {
@@ -385,8 +385,6 @@ func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {
-	// fmt.Printf("DEBUG: parseExpression entered with curToken=%v (literal: %s), precedence=%d\n", p.curToken.Type, p.curToken.Literal, precedence)
-
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
@@ -395,7 +393,6 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 
 	leftExp := prefix()
 	if leftExp == nil {
-		// fmt.Printf("DEBUG: prefix parsing returned nil for token %v\n", p.curToken.Type)
 		return nil
 	}
 
@@ -406,7 +403,6 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	for !p.curTokenIs(lexer.SEMI) && !p.curTokenIs(lexer.EOF) && precedence < p.peekPrecedence() {
 		loopCount++
 		if loopCount > maxLoops {
-			// fmt.Printf("DEBUG: Breaking out of potential infinite loop. Current token: %v, Peek token: %v\n", p.curToken.Type, p.peekToken.Type)
 			return leftExp
 		}
 
@@ -418,13 +414,11 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		p.nextToken()
 		newExp := infix(leftExp)
 		if newExp == nil {
-			// fmt.Printf("DEBUG: infix parsing returned nil\n")
 			return leftExp // Return what we have so far instead of nil
 		}
 		leftExp = newExp
 	}
 
-	// fmt.Printf("DEBUG: parseExpression completed successfully with result: %v\n", leftExp)
 	return leftExp
 }
 
@@ -475,9 +469,45 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	return &ast.IntegerLiteral{Token: p.curToken, Value: num}
 }
 
+// Update parseStringLiteral to handle escaping
 func (p *Parser) parseStringLiteral() ast.Expression {
-	str := p.curToken.Literal
-	return &ast.StringLiteral{Token: p.curToken, Value: str}
+	value := p.unescapeString(p.curToken.Literal)
+	return &ast.StringLiteral{
+		Token: p.curToken,
+		Value: value,
+	}
+}
+
+func (p *Parser) unescapeString(s string) string {
+	var result strings.Builder
+	escaped := false
+
+	// Remove surrounding quotes
+	s = s[1 : len(s)-1]
+
+	for _, ch := range s {
+		if escaped {
+			switch ch {
+			case 'n':
+				result.WriteRune('\n')
+			case 't':
+				result.WriteRune('\t')
+			case '"':
+				result.WriteRune('"')
+			case '\\':
+				result.WriteRune('\\')
+			default:
+				result.WriteRune(ch)
+			}
+			escaped = false
+		} else if ch == '\\' {
+			escaped = true
+		} else {
+			result.WriteRune(ch)
+		}
+	}
+
+	return result.String()
 }
 
 func (p *Parser) parseBooleanLiteral() ast.Expression {
@@ -612,7 +642,7 @@ func (p *Parser) parseIsVoidExpression() ast.Expression {
 	return exp
 }
 
-// Fix parseDotExpression to properly handle method calls
+// Fix parseDotExpression to properly handle method calls with arguments
 func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
 	exp := &ast.MethodCallExpression{
 		Token:  p.curToken,
@@ -733,6 +763,7 @@ func (p *Parser) parseBlockExpression() ast.Expression {
 		if exp != nil {
 			block.Expressions = append(block.Expressions, exp)
 		}
+
 		if !p.expectAndPeek(lexer.SEMI) {
 			return nil
 		}
@@ -750,59 +781,89 @@ func (p *Parser) parseBlockExpression() ast.Expression {
 
 func (p *Parser) parseCaseExpression() ast.Expression {
 	exp := &ast.CaseExpression{Token: p.curToken}
-	p.nextToken() // consume 'case'
+	p.nextToken()
 
 	exp.Subject = p.parseExpression(LOWEST)
-
-	if !p.expectCurrent(lexer.OF) {
+	if exp.Subject == nil {
 		return nil
 	}
 
+	if !p.expectAndPeek(lexer.OF) {
+		return nil
+	}
+	p.nextToken()
+
 	for !p.curTokenIs(lexer.ESAC) && !p.curTokenIs(lexer.EOF) {
+		if p.curTokenIs(lexer.SEMI) {
+			p.nextToken()
+			continue
+		}
+
 		branch := p.parseCaseBranch()
 		if branch == nil {
 			return nil
 		}
 		exp.Branches = append(exp.Branches, branch)
-		if !p.expectCurrent(lexer.SEMI) {
-			return nil
+
+		if !p.curTokenIs(lexer.ESAC) && !p.peekTokenIs(lexer.ESAC) {
+			if !p.peekTokenIs(lexer.SEMI) {
+				return nil
+			}
+			p.nextToken()
+			p.nextToken()
 		}
 	}
 
-	if !p.expectCurrent(lexer.ESAC) {
+	if !p.curTokenIs(lexer.ESAC) {
+		p.currentError(lexer.ESAC)
 		return nil
 	}
+	p.nextToken()
 
 	return exp
 }
 
 func (p *Parser) parseCaseBranch() *ast.CaseBranch {
-	branch := &ast.CaseBranch{}
-
 	if !p.curTokenIs(lexer.OBJECTID) {
 		p.currentError(lexer.OBJECTID)
 		return nil
 	}
 
-	branch.Variable = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	branch := &ast.CaseBranch{
+		Variable: &ast.ObjectIdentifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		},
+	}
+	p.nextToken()
 
-	if !p.expectCurrent(lexer.COLON) {
+	if !p.curTokenIs(lexer.COLON) {
+		p.currentError(lexer.COLON)
 		return nil
 	}
+	p.nextToken()
 
 	if !p.curTokenIs(lexer.TYPEID) {
 		p.currentError(lexer.TYPEID)
 		return nil
 	}
 
-	branch.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	branch.Type = &ast.TypeIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+	p.nextToken()
 
-	if !p.expectCurrent(lexer.DARROW) {
+	if !p.curTokenIs(lexer.DARROW) {
+		p.currentError(lexer.DARROW)
 		return nil
 	}
-
 	p.nextToken()
+
 	branch.Expression = p.parseExpression(LOWEST)
+	if branch.Expression == nil {
+		return nil
+	}
 
 	return branch
 }

@@ -289,3 +289,127 @@ func TestMethodBodyParsing(t *testing.T) {
 		t.Errorf("binaryExp.Operator is not '+'. got=%q", binaryExp.Operator)
 	}
 }
+
+func TestBlockExpressionParsing(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"{ 1; 2; 3; }",
+			"{ 1; 2; 3 }",
+		},
+		{
+			"{ x <- 1; y <- 2; x + y; }",
+			"{ (x <- 1); (y <- 2); (x + y) }",
+		},
+	}
+
+	for i, tt := range tests {
+		p := newParserFromInput(tt.input)
+		expression := p.parseExpression(LOWEST)
+
+		if expression == nil {
+			t.Errorf("test [%d] failed to parse expression: %q", i, tt.input)
+			continue
+		}
+
+		actual := SerializeExpression(expression)
+		if actual != tt.expected {
+			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+		}
+	}
+}
+
+func TestCaseExpressionParsing(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"case x of a:Int => 1; b:String => 2; c:Bool => 3; esac",
+			"case x of a : Int => 1; b : String => 2; c : Bool => 3 esac",
+		},
+		{
+			"case y of i:Int => i + 1; s:String => s.length(); esac",
+			"case y of i : Int => (i + 1); s : String => ((s . length)) esac",
+		},
+	}
+
+	for i, tt := range tests {
+		p := newParserFromInput(tt.input)
+		expression := p.parseExpression(LOWEST)
+
+		if expression == nil {
+			t.Errorf("test [%d] failed to parse expression: %q", i, tt.input)
+			continue
+		}
+
+		_, ok := expression.(*ast.CaseExpression)
+		if !ok {
+			t.Fatalf("test [%d] expression is not ast.CaseExpression. got=%T", i, expression)
+		}
+
+		actual := SerializeExpression(expression)
+		if actual != tt.expected {
+			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+		}
+	}
+}
+
+func TestMethodCallWithArguments(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"obj.method(1, 2, 3)",
+			"((obj . method))",
+		},
+		{
+			"method(1, true, \"hello\")",
+			`method(1, true, "hello")`,
+		},
+	}
+
+	for i, tt := range tests {
+		p := newParserFromInput(tt.input)
+		expression := p.parseExpression(LOWEST)
+
+		if expression == nil {
+			t.Errorf("test [%d] failed to parse expression: %q", i, tt.input)
+			continue
+		}
+
+		actual := SerializeExpression(expression)
+		if actual != tt.expected {
+			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+		}
+	}
+}
+
+func TestStringEscaping(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{`"hello\n"`, `"hello\n"`},
+		{`"tab\there"`, `"tab\there"`},
+		{`"quotes\"here"`, `"quotes\"here"`},
+	}
+
+	for i, tt := range tests {
+		p := newParserFromInput(tt.input)
+		expression := p.parseExpression(LOWEST)
+
+		if expression == nil {
+			t.Errorf("test [%d] failed to parse expression: %q", i, tt.input)
+			continue
+		}
+
+		actual := SerializeExpression(expression)
+		if actual != tt.expected {
+			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+		}
+	}
+}

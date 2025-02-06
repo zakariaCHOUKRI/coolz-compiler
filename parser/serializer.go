@@ -80,6 +80,23 @@ func SerializeExpression(exp ast.Expression) string {
 		return fmt.Sprintf("let %s in %s",
 			strings.Join(bindings, ", "),
 			SerializeExpression(e.In))
+	case *ast.BlockExpression:
+		exprs := make([]string, len(e.Expressions))
+		for i, expr := range e.Expressions {
+			exprs[i] = SerializeExpression(expr)
+		}
+		return "{ " + strings.Join(exprs, "; ") + " }"
+	case *ast.CaseExpression:
+		branches := make([]string, len(e.Branches))
+		for i, branch := range e.Branches {
+			branches[i] = fmt.Sprintf("%s : %s => %s",
+				branch.Variable.Value,
+				branch.Type.Value,
+				SerializeExpression(branch.Expression))
+		}
+		return fmt.Sprintf("case %s of %s esac",
+			SerializeExpression(e.Subject),
+			strings.Join(branches, "; "))
 	default:
 		return fmt.Sprintf("%T", exp)
 	}
