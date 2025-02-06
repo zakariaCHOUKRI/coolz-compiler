@@ -5,7 +5,6 @@ import (
 	"coolz-compiler/lexer"
 	"strings"
 	"testing"
-	"time"
 )
 
 func newParserFromInput(input string) *Parser {
@@ -31,22 +30,22 @@ func TestClassParser(t *testing.T) {
 		expectedParent string
 	}{
 		{
-			input:          "class Main {};",
+			input:          "class Main { };",
 			expectedName:   "Main",
 			expectedParent: "",
 		},
 		{
-			input:          "class A {age:Integer<-30;};",
+			input:          "class A { age:Integer <- 30; };",
 			expectedName:   "A",
 			expectedParent: "",
 		},
 		{
-			input:          "class B {func(): Void {};};",
+			input:          "class B { func(): Void { }; };",
 			expectedName:   "B",
 			expectedParent: "",
 		},
 		{
-			input:          "class B inherits A {func(): Void {};};",
+			input:          "class B inherits A { func(): Void { }; };",
 			expectedName:   "B",
 			expectedParent: "A",
 		},
@@ -102,7 +101,7 @@ func TestFormalParsing(t *testing.T) {
 		}
 
 		if len(formals) != len(tt.expectedNames) {
-			t.Fatalf("[%q]: expected %d formals got %d: %v", tt.input, len(tt.expectedNames), len(formals), formals)
+			t.Fatalf("[%q]: expected %d formals got %d", tt.input, len(tt.expectedNames), len(formals))
 		}
 
 		for i, formal := range formals {
@@ -110,7 +109,7 @@ func TestFormalParsing(t *testing.T) {
 				t.Fatalf("[%q]: expected formal name to be %q got %q", tt.input, tt.expectedNames[i], formal.Name.Value)
 			}
 			if formal.Type.Value != tt.expectedTypes[i] {
-				t.Fatalf("[%q]: expected formal type to be %q got %q", tt.input, tt.expectedNames[i], formal.Name.Value)
+				t.Fatalf("[%q]: expected formal type to be %q got %q", tt.input, tt.expectedTypes[i], formal.Type.Value)
 			}
 		}
 	}
@@ -125,14 +124,14 @@ func TestMethodParsing(t *testing.T) {
 		expectedMethodType  string
 	}{
 		{
-			input:               "main(): Void {};",
+			input:               "main(): Void { 1 }",
 			expectedMethodName:  "main",
 			expectedFormalNames: []string{},
 			expectedFormalTypes: []string{},
 			expectedMethodType:  "Void",
 		},
 		{
-			input:               "sum(a:Integer,b:Integer): Integer {};",
+			input:               "sum(a:Integer,b:Integer): Integer { 1 }",
 			expectedMethodName:  "sum",
 			expectedFormalNames: []string{"a", "b"},
 			expectedFormalTypes: []string{"Integer", "Integer"},
@@ -142,7 +141,18 @@ func TestMethodParsing(t *testing.T) {
 
 	for i, tt := range tests {
 		parser := newParserFromInput(tt.input)
-		method := parser.parseMethod()
+		feature := parser.parseFeature()
+
+		if len(parser.Errors()) > 0 {
+			t.Errorf("parser has errors: %v", parser.Errors())
+			continue
+		}
+
+		method, ok := feature.(*ast.Method)
+		if !ok {
+			t.Fatalf("Expected *ast.Method, got %T", feature)
+		}
+
 		checkParserErrors(t, parser, i)
 
 		if method.Name.Value != tt.expectedMethodName {
@@ -166,18 +176,17 @@ func TestMethodParsing(t *testing.T) {
 
 func TestAttributeParsing(t *testing.T) {
 	tests := []struct {
-		input              string
-		expectedName       string
-		expectedType       string
-		expectedExpression ast.Expression
+		input        string
+		expectedName string
+		expectedType string
 	}{
 		{
-			input:        "firstName:String",
+			input:        "firstName:String;",
 			expectedName: "firstName",
 			expectedType: "String",
 		},
 		{
-			input:        "age:Integer<-0",
+			input:        "age:Integer <- 0;",
 			expectedName: "age",
 			expectedType: "Integer",
 		},
@@ -185,9 +194,15 @@ func TestAttributeParsing(t *testing.T) {
 
 	for i, tt := range tests {
 		parser := newParserFromInput(tt.input)
-		attribute := parser.parseAttribute()
+		feature := parser.parseFeature()
 
 		checkParserErrors(t, parser, i)
+
+		attribute, ok := feature.(*ast.Attribute)
+		if !ok {
+			t.Fatalf("[%q]: Expected *ast.Attribute, got %T", tt.input, feature)
+		}
+
 		if attribute.Name.Value != tt.expectedName {
 			t.Fatalf("[%q]: Expected attribute name to be %q got %q", tt.input, tt.expectedName, attribute.Name.Value)
 		}
@@ -226,30 +241,51 @@ func TestExpressionParsing(t *testing.T) {
 		{"1 * 2 + 3", "((1 * 2) + 3)"},
 		{"x.foo()", "((x . foo))"},
 		{"x.foo(1,2)", "((x . foo))"}, // arguments not printed in this example
+		{"self", "self"},
+		{"foo()", "foo()"},
+		{"foo(1, 2)", "foo(1, 2)"},
+		{"obj.method(1, 2)", "((obj . method))"},
+		{"let x:Int <- 5 in x + 1", "let x:Int <- 5 in (x + 1)"},
 	}
 
 	for i, tt := range tests {
-		done := make(chan bool)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("test [%d] panicked: %v", i, r)
-				}
-				done <- true
-			}()
-			p := newParserFromInput(tt.input)
-			checkParserErrors(t, p, i)
+		p := newParserFromInput(tt.input)
+		expression := p.parseExpression(LOWEST)
 
-			expression := p.parseExpression(LOWEST)
-			actual := SerializeExpression(expression)
-			if actual != tt.expected {
-				t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
-			}
-		}()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Errorf("test [%d] timed out", i)
+		if expression == nil {
+			t.Errorf("test [%d] failed to parse expression: %q", i, tt.input)
+			continue
 		}
+
+		actual := SerializeExpression(expression) // This will now use the function from serializer.go
+
+		if actual != tt.expected {
+			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+		}
+	}
+}
+
+func TestMethodBodyParsing(t *testing.T) {
+	input := `method(): Int { 1 + 2 }`
+	parser := newParserFromInput(input)
+	feature := parser.parseFeature()
+	method, ok := feature.(*ast.Method)
+	if !ok {
+		t.Fatalf("Expected *ast.Method, got %T", feature)
+	}
+
+	checkParserErrors(t, parser, 0)
+
+	if method.Body == nil {
+		t.Fatal("Method body is nil")
+	}
+
+	binaryExp, ok := method.Body.(*ast.BinaryExpression)
+	if !ok {
+		t.Fatalf("method.Body is not ast.BinaryExpression. got=%T", method.Body)
+	}
+
+	if binaryExp.Operator != "+" {
+		t.Errorf("binaryExp.Operator is not '+'. got=%q", binaryExp.Operator)
 	}
 }

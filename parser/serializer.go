@@ -11,87 +11,75 @@ func SerializeExpression(exp ast.Expression) string {
 		return "<nil>"
 	}
 
-	switch node := exp.(type) {
-	case *ast.ObjectIdentifier:
-		return node.Value
-
+	switch e := exp.(type) {
 	case *ast.IntegerLiteral:
-		return fmt.Sprintf("%d", node.Value)
-
+		return e.Token.Literal
 	case *ast.StringLiteral:
-		return fmt.Sprintf("%q", node.Value)
-
+		return fmt.Sprintf("%q", e.Token.Literal) // Add quotes around string literals
 	case *ast.BooleanLiteral:
-		return fmt.Sprintf("%v", node.Value)
-
+		return e.Token.Literal
+	case *ast.ObjectIdentifier:
+		return e.Value
 	case *ast.UnaryExpression:
-		return fmt.Sprintf("(%s %s)", node.Operator, SerializeExpression(node.Right))
-
+		return fmt.Sprintf("(%s %s)", e.Operator, SerializeExpression(e.Right))
 	case *ast.BinaryExpression:
-		if node.Operator == "." {
-			return fmt.Sprintf("((%s %s %s))",
-				SerializeExpression(node.Left),
-				node.Operator,
-				SerializeExpression(node.Right))
-		}
 		return fmt.Sprintf("(%s %s %s)",
-			SerializeExpression(node.Left),
-			node.Operator,
-			SerializeExpression(node.Right))
-
+			SerializeExpression(e.Left),
+			e.Operator,
+			SerializeExpression(e.Right))
+	case *ast.IsVoidExpression:
+		return fmt.Sprintf("isvoid %s", SerializeExpression(e.Expression))
+	case *ast.NewExpression:
+		return fmt.Sprintf("new %s", e.Type.Value)
 	case *ast.AssignExpression:
 		return fmt.Sprintf("(%s <- %s)",
-			SerializeExpression(node.Left),
-			SerializeExpression(node.Right))
-
-	case *ast.IsVoidExpression:
-		return fmt.Sprintf("isvoid %s", SerializeExpression(node.Expression))
-
-	case *ast.NewExpression:
-		return fmt.Sprintf("new %s", node.Type.Value)
-
+			SerializeExpression(e.Left),
+			SerializeExpression(e.Right))
 	case *ast.IfExpression:
 		return fmt.Sprintf("if %s then %s else %s fi",
-			SerializeExpression(node.Condition),
-			SerializeExpression(node.Consequence),
-			SerializeExpression(node.Alternative))
-
+			SerializeExpression(e.Condition),
+			SerializeExpression(e.Consequence),
+			SerializeExpression(e.Alternative))
 	case *ast.WhileExpression:
 		return fmt.Sprintf("while %s loop %s pool",
-			SerializeExpression(node.Condition),
-			SerializeExpression(node.Body))
-
-	case *ast.BlockExpression:
-		var sb strings.Builder
-		sb.WriteString("{ ")
-		for i, expr := range node.Expressions {
-			sb.WriteString(SerializeExpression(expr))
-			if i < len(node.Expressions)-1 {
-				sb.WriteString("; ")
-			}
+			SerializeExpression(e.Condition),
+			SerializeExpression(e.Body))
+	case *ast.MethodCallExpression:
+		args := make([]string, len(e.Arguments))
+		for i, arg := range e.Arguments {
+			args[i] = SerializeExpression(arg)
 		}
-		sb.WriteString(" }")
-		return sb.String()
-
+		return fmt.Sprintf("((%s . %s))",
+			SerializeExpression(e.Object),
+			e.Method.Value)
+	case *ast.SelfExpression:
+		return "self"
+	case *ast.DispatchExpression:
+		args := make([]string, len(e.Arguments))
+		for i, arg := range e.Arguments {
+			args[i] = SerializeExpression(arg)
+		}
+		if len(args) == 0 {
+			return fmt.Sprintf("%s()", e.Method.Value)
+		}
+		return fmt.Sprintf("%s(%s)", e.Method.Value, strings.Join(args, ", "))
 	case *ast.LetExpression:
-		var sb strings.Builder
-		sb.WriteString("let ")
-		for i, binding := range node.Bindings {
-			sb.WriteString(binding.Identifier.Value)
-			sb.WriteString(" : ")
-			sb.WriteString(binding.Type.Value)
+		bindings := make([]string, len(e.Bindings))
+		for i, binding := range e.Bindings {
 			if binding.Init != nil {
-				sb.WriteString(" <- ")
-				sb.WriteString(SerializeExpression(binding.Init))
-			}
-			if i < len(node.Bindings)-1 {
-				sb.WriteString(", ")
+				bindings[i] = fmt.Sprintf("%s:%s <- %s",
+					binding.Identifier.Value,
+					binding.Type.Value,
+					SerializeExpression(binding.Init))
+			} else {
+				bindings[i] = fmt.Sprintf("%s:%s",
+					binding.Identifier.Value,
+					binding.Type.Value)
 			}
 		}
-		sb.WriteString(" in ")
-		sb.WriteString(SerializeExpression(node.In))
-		return sb.String()
-
+		return fmt.Sprintf("let %s in %s",
+			strings.Join(bindings, ", "),
+			SerializeExpression(e.In))
 	default:
 		return fmt.Sprintf("%T", exp)
 	}
