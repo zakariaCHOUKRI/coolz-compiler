@@ -413,3 +413,53 @@ func TestStringEscaping(t *testing.T) {
 		}
 	}
 }
+
+func TestPrattParsing(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Start with simpler cases first
+		{"1", "1"},
+		{"1 + 2", "(1 + 2)"},
+		// Basic operators
+		{"1 + 2 + 3", "((1 + 2) + 3)"},
+		{"1 + 2 * 3", "(1 + (2 * 3))"},
+		{"1 * 2 * 3", "((1 * 2) * 3)"},
+		{"1 * 2 + 3 * 4", "((1 * 2) + (3 * 4))"},
+		{"1 + 2 * 3 + 4", "((1 + (2 * 3)) + 4)"},
+
+		// Comparison operators
+		{"1 < 2 = true", "((1 < 2) = true)"},
+		{"not 1 < 2", "(not (1 < 2))"},
+		{"1 <= 2 * 3", "(1 <= (2 * 3))"},
+
+		// Nested expressions
+		{"(1 + 2) * 3", "((1 + 2) * 3)"},
+		{"(1 * 2) + (3 * 4)", "((1 * 2) + (3 * 4))"},
+
+		// Method calls and dot expressions
+		{"obj.method(1 + 2, 3 * 4)", "((obj . method))"},
+		{"a <- b.method()", "(a <- ((b . method)))"},
+
+		// Complex expressions
+		{"let x:Int <- 1 + 2 * 3 in x + 4", "let x:Int <- (1 + (2 * 3)) in (x + 4)"},
+		{"if 1 < 2 * 3 then 4 + 5 else 6 * 7 fi", "if (1 < (2 * 3)) then (4 + 5) else (6 * 7) fi"},
+		{"while 1 + 2 <= 3 * 4 loop 5 + 6 pool", "while ((1 + 2) <= (3 * 4)) loop (5 + 6) pool"},
+	}
+
+	for i, tt := range tests {
+		p := newParserFromInput(tt.input)
+		expression := p.parseExpression(LOWEST)
+
+		if expression == nil {
+			t.Errorf("test [%d] failed to parse expression: %q", i, tt.input)
+			continue
+		}
+
+		actual := SerializeExpression(expression)
+		if actual != tt.expected {
+			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
+		}
+	}
+}

@@ -537,6 +537,13 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 		Token:    p.curToken,
 		Operator: p.curToken.Literal,
 	}
+	// If it's 'not', parse the entire next expression at LOWEST precedence
+	if p.curTokenIs(lexer.NOT) {
+		p.nextToken()
+		exp.Right = p.parseExpression(LOWEST)
+		return exp
+	}
+	// ...existing code...
 	p.nextToken()
 	exp.Right = p.parseExpression(PREFIX)
 	return exp
@@ -901,5 +908,6 @@ var precedences = map[lexer.TokenType]int{
 	lexer.DIVIDE: PRODUCT,
 	lexer.TIMES:  PRODUCT, // Add TIMES operator
 	lexer.DOT:    DOT,     // Add DOT operator
+	lexer.NOT:    LOWEST,  // Lower "not" so it affects the entire expression
 	lexer.RBRACE: LOWEST,  // Add RBRACE operator
 }

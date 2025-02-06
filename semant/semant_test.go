@@ -34,6 +34,32 @@ func TestBasicTypeChecking(t *testing.T) {
 			`,
 			shouldError: false,
 		},
+		{
+			input: `
+				class Main {
+					x : Int <- "string";  // Type mismatch
+				};
+			`,
+			shouldError: true,
+			errorCount:  1,
+		},
+		{
+			input: `
+				class Main {
+					x : Int;  // Uninitialized attribute is valid
+				};
+			`,
+			shouldError: false,
+		},
+		{
+			input: `
+				class Main {
+					x : Int <- true;  // Bool cannot be assigned to Int
+				};
+			`,
+			shouldError: true,
+			errorCount:  1,
+		},
 	}
 
 	for i, test := range tests {
@@ -183,6 +209,165 @@ func TestMethodDispatch(t *testing.T) {
 				};
 			`,
 			shouldError: true,
+		},
+	}
+
+	for i, test := range tests {
+		program := parseProgram(test.input)
+		analyzer := NewSemanticAnalyser()
+		analyzer.Analyze(program)
+
+		hasErrors := len(analyzer.Errors()) > 0
+		if hasErrors != test.shouldError {
+			t.Errorf("test %d: expected errors = %v, got errors: %v",
+				i, test.shouldError, analyzer.Errors())
+		}
+	}
+}
+
+func TestMethodTypeChecking(t *testing.T) {
+	tests := []struct {
+		input       string
+		shouldError bool
+	}{
+		{
+			input: `
+				class Main {
+					add(x: Int, y: Int): Int { x + y };
+				};
+			`,
+			shouldError: false,
+		},
+		{
+			input: `
+				class Main {
+					add(x: Int, y: Int): String { x + y };  // Return type mismatch
+				};
+			`,
+			shouldError: true,
+		},
+		{
+			input: `
+				class Main {
+					sameName(x: Int): Int { 1 };
+					sameName(y: String): String { "hello" };  // Method redefinition
+				};
+			`,
+			shouldError: true,
+		},
+	}
+
+	for i, test := range tests {
+		program := parseProgram(test.input)
+		analyzer := NewSemanticAnalyser()
+		analyzer.Analyze(program)
+
+		hasErrors := len(analyzer.Errors()) > 0
+		if hasErrors != test.shouldError {
+			t.Errorf("test %d: expected errors = %v, got errors: %v",
+				i, test.shouldError, analyzer.Errors())
+		}
+	}
+}
+
+func TestComplexExpressions(t *testing.T) {
+	tests := []struct {
+		input       string
+		shouldError bool
+	}{
+		{
+			input: `
+				class Main {
+					test(): Int {
+						if true then 
+							1 + 2 * 3
+						else
+							4 / 2
+						fi
+					};
+				};
+			`,
+			shouldError: false,
+		},
+		{
+			input: `
+				class Main {
+					test(): Int {
+						let x: Int <- 1,
+							y: Int <- 2 in
+						x + y
+					};
+				};
+			`,
+			shouldError: false,
+		},
+		{
+			input: `
+				class Main {
+					test(): Int {
+						case "hello" of
+							x: Int => 1;
+							y: String => 2;
+						esac
+					};
+				};
+			`,
+			shouldError: false,
+		},
+	}
+
+	for i, test := range tests {
+		program := parseProgram(test.input)
+		analyzer := NewSemanticAnalyser()
+		analyzer.Analyze(program)
+
+		hasErrors := len(analyzer.Errors()) > 0
+		if hasErrors != test.shouldError {
+			t.Errorf("test %d: expected errors = %v, got errors: %v",
+				i, test.shouldError, analyzer.Errors())
+		}
+	}
+}
+
+func TestScopeChecking(t *testing.T) {
+	tests := []struct {
+		input       string
+		shouldError bool
+	}{
+		{
+			input: `
+				class Main {
+					x: Int;
+					test(): Int {
+						let x: String <- "hello" in  // Valid shadowing
+							1
+					};
+				};
+			`,
+			shouldError: false,
+		},
+		{
+			input: `
+				class Main {
+					test(): Int {
+						{
+							let x: Int <- 1 in x;
+							x;  // x not in scope
+						}
+					};
+				};
+			`,
+			shouldError: true,
+		},
+		{
+			input: `
+				class Main {
+					test(x: Int): Int {
+						let x: Int <- 1 in x  // Valid parameter shadowing
+					};
+				};
+			`,
+			shouldError: false,
 		},
 	}
 

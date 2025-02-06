@@ -106,20 +106,26 @@ func (sa *SemanticAnalyser) Analyze(program *ast.Program) {
 	sa.typeCheck(program)
 }
 
+// Add validation for inheritance from basic types
 func (sa *SemanticAnalyser) buildInheritanceGraph(program *ast.Program) {
 	// Add basic classes
 	sa.inheritanceGraph["Int"] = "Object"
 	sa.inheritanceGraph["String"] = "Object"
 	sa.inheritanceGraph["Bool"] = "Object"
 
+	basicTypes := map[string]bool{
+		"Int":    true,
+		"String": true,
+		"Bool":   true,
+	}
+
 	for _, class := range program.Classes {
 		childName := class.Name.Value
 		parentName := "Object"
 		if class.Parent != nil {
 			parentName = class.Parent.Value
-			// Check for invalid inheritance
-			if parentName == "Int" || parentName == "String" || parentName == "Bool" {
-				sa.errors = append(sa.errors, fmt.Sprintf("Class %s cannot inherit from %s", childName, parentName))
+			if basicTypes[parentName] {
+				sa.errors = append(sa.errors, fmt.Sprintf("Class %s cannot inherit from basic type %s", childName, parentName))
 				continue
 			}
 		}
@@ -127,38 +133,37 @@ func (sa *SemanticAnalyser) buildInheritanceGraph(program *ast.Program) {
 	}
 }
 
+// Modify detectInheritanceCycles to properly detect cycles and report errors
 func (sa *SemanticAnalyser) detectInheritanceCycles() bool {
 	visited := make(map[string]bool)
 	inStack := make(map[string]bool)
 
-	var dfs func(node string) bool
-	dfs = func(node string) bool {
+	var hasCycle bool
+
+	var dfs func(node string)
+	dfs = func(node string) {
 		visited[node] = true
 		inStack[node] = true
 
 		if parent, ok := sa.inheritanceGraph[node]; ok {
 			if !visited[parent] {
-				if dfs(parent) {
-					return true
-				}
+				dfs(parent)
 			} else if inStack[parent] {
-				sa.errors = append(sa.errors, fmt.Sprintf("Inheritance cycle detected involving class %s", node))
-				return true
+				sa.errors = append(sa.errors, fmt.Sprintf("Inheritance cycle detected involving class %s and %s", node, parent))
+				hasCycle = true
 			}
 		}
 
 		inStack[node] = false
-		return false
 	}
 
 	for class := range sa.inheritanceGraph {
 		if !visited[class] {
-			if dfs(class) {
-				return true
-			}
+			dfs(class)
 		}
 	}
-	return false
+
+	return hasCycle
 }
 
 func (sa *SemanticAnalyser) typeCheck(program *ast.Program) {
@@ -342,58 +347,60 @@ func (sa *SemanticAnalyser) getExpressionType(expression ast.Expression, st *Sym
 }
 
 func (sa *SemanticAnalyser) getExpressionTypeInternal(expression ast.Expression, st *SymbolTable, visited map[ast.Expression]bool) string {
-	callCount["getExpressionTypeInternal"]++
-	if callCount["getExpressionTypeInternal"] > 1000 {
-		panic("Potential infinite recursion in getExpressionTypeInternal")
-	}
-
-	debugDepth++
-	defer func() { debugDepth-- }()
-
-	if visited[expression] {
-		debug("Cycle detected in expression type checking")
+	if expression == nil {
 		return "Object"
 	}
 
-	debug("Checking expression type: %T", expression)
+	if visited[expression] {
+		return "Object" // Break cycles
+	}
 	visited[expression] = true
 
 	switch e := expression.(type) {
+	case *ast.StringLiteral:
+		if e.Value == "" {
+			sa.errors = append(sa.errors, "Invalid string literal")
+			return "Object"
+		}
+		return "String"
 	case *ast.IntegerLiteral:
 		return "Int"
-	case *ast.StringLiteral:
-		return "String"
 	case *ast.BooleanLiteral:
 		return "Bool"
+	case *ast.SelfExpression:
+		return "SELF_TYPE"
+	case *ast.ObjectIdentifier:
+		return sa.getIdentifierType(e, st)
 	case *ast.BlockExpression:
 		return sa.getBlockExpressionType(e, st)
 	case *ast.IfExpression:
 		return sa.getIfExpressionType(e, st)
 	case *ast.WhileExpression:
 		return sa.getWhileExpressionType(e, st)
-	case *ast.NewExpression:
-		return sa.getNewExpressionType(e, st)
 	case *ast.LetExpression:
 		return sa.getLetExpressionType(e, st)
-	case *ast.AssignExpression:
-		return sa.getAssignExpressionType(e, st)
-	case *ast.UnaryExpression:
-		return sa.getUnaryExpressionType(e, st)
-	case *ast.BinaryExpression:
-		return sa.getBinaryExpressionType(e, st)
 	case *ast.CaseExpression:
 		return sa.getCaseExpressionType(e, st)
+	case *ast.NewExpression:
+		return sa.getNewExpressionType(e, st)
 	case *ast.IsVoidExpression:
+		if e.Expression == nil {
+			sa.errors = append(sa.errors, "Invalid isvoid expression")
+			return "Object"
+		}
 		return "Bool"
+	case *ast.BinaryExpression:
+		return sa.getBinaryExpressionType(e, st)
+	case *ast.UnaryExpression:
+		return sa.getUnaryExpressionType(e, st)
+	case *ast.AssignExpression:
+		return sa.getAssignExpressionType(e, st)
 	case *ast.MethodCallExpression:
 		return sa.getMethodCallExpressionType(e, st)
 	case *ast.DispatchExpression:
 		return sa.getDispatchExpressionType(e, st)
-	case *ast.ObjectIdentifier:
-		return sa.getIdentifierType(e, st)
-	case *ast.SelfExpression:
-		return "SELF_TYPE"
 	default:
+		sa.errors = append(sa.errors, fmt.Sprintf("Unknown expression type: %T", expression))
 		return "Object"
 	}
 }
