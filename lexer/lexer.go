@@ -408,3 +408,31 @@ func (l *Lexer) NextToken() Token {
 
 	return tok
 }
+
+// GetOperatorType returns the TokenType for a given operator string
+func GetOperatorType(op string) TokenType {
+	switch op {
+	case "+":
+		return PLUS
+	case "-":
+		return MINUS
+	case "*":
+		return TIMES
+	case "/":
+		return DIVIDE
+	case "<":
+		return LT
+	case "<=":
+		return LE
+	case "=":
+		return EQ
+	case "<-":
+		return ASSIGN
+	case "~":
+		return NEG
+	case ".":
+		return DOT
+	default:
+		return ERROR
+	}
+}

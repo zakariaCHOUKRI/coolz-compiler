@@ -177,6 +177,15 @@ type LetBinding struct {
 	Identifier *ObjectIdentifier // The identifier of the binding.
 	Type       *TypeIdentifier   // The type of the binding.
 	Init       Expression        // The initialization expression, if any.
+	Token      lexer.Token       // Add Token field
+}
+
+// Add TokenLiteral method to implement Node interface
+func (lb *LetBinding) TokenLiteral() string {
+	if lb.Identifier != nil {
+		return lb.Identifier.TokenLiteral()
+	}
+	return ""
 }
 
 // NewExpression represents the 'new' type expression in the AST.
@@ -223,6 +232,15 @@ type CaseBranch struct {
 	Variable   *ObjectIdentifier
 	Type       *TypeIdentifier
 	Expression Expression
+	Token      lexer.Token // Add Token field
+}
+
+// Add TokenLiteral method to implement Node interface
+func (cb *CaseBranch) TokenLiteral() string {
+	if cb.Variable != nil {
+		return cb.Variable.TokenLiteral()
+	}
+	return ""
 }
 
 // MethodCallExpression represents a method call
