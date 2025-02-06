@@ -34,6 +34,8 @@ const (
 	NEW
 	OF
 	NOT
+	SELF      // Add SELF token type
+	SELF_TYPE // Add SELF_TYPE token type
 
 	// Data types
 	STR_CONST
@@ -68,7 +70,8 @@ const (
 
 func (tt TokenType) String() string {
 	return [...]string{"EOF", "ERROR", "CLASS", "INHERITS", "ISVOID", "IF", "ELSE", "FI", "THEN", "LET", "IN", "WHILE", "CASE", "ESCA", "LOOP", "POOL",
-		"NEW", "OF", "NOT", "STR_CONST", "BOOL_CONST", "INT_CONST", "TYPEID", "OBJECTID", "ASSIGN", "DARROW", "LT", "LE", "EQ", "PLUS", "MINUS", "TIMES",
+		"NEW", "OF", "NOT", "SELF", "SELF_TYPE", // Add SELF and SELF_TYPE to string mapping
+		"STR_CONST", "BOOL_CONST", "INT_CONST", "TYPEID", "OBJECTID", "ASSIGN", "DARROW", "LT", "LE", "EQ", "PLUS", "MINUS", "TIMES",
 		"DIVIDE", "LPAREN", "RPAREN", "LBRACE", "RBACE", "SEMI", "COLON", "COMMA", "DOT", "AT", "NEG"}[tt]
 }
 
@@ -381,6 +384,10 @@ func (l *Lexer) NextToken() Token {
 			tok.Type = NEW
 		case "not":
 			tok.Type = NOT
+		case "self":
+			tok.Type = SELF
+		case "self_type":
+			tok.Type = SELF_TYPE
 		// Handle boolean const
 		case "true", "false":
 			tok.Type = BOOL_CONST

@@ -21,6 +21,7 @@ type Expression interface {
 type Feature interface {
 	Node
 	featureNode()
+	GetToken() lexer.Token
 }
 
 type TypeIdentifier struct {
@@ -54,21 +55,27 @@ type Class struct {
 func (c *Class) TokenLiteral() string { return c.Token.Literal }
 
 type Attribute struct {
-	Name *ObjectIdentifier
-	Type *TypeIdentifier
+	Token lexer.Token
+	Name  *ObjectIdentifier
+	Type  *TypeIdentifier
+	Init  Expression
 }
 
-func (a *Attribute) TokenLiteral() string { return a.Name.Value }
-func (a *Attribute) featureNode()         {}
+func (a *Attribute) TokenLiteral() string  { return a.Token.Literal }
+func (a *Attribute) GetToken() lexer.Token { return a.Token }
+func (a *Attribute) featureNode()          {}
 
 type Method struct {
-	Name    *ObjectIdentifier // machi logique OnjectID li kan cs == Token itself ??
-	Type    *TypeIdentifier
+	Token   lexer.Token
+	Name    *ObjectIdentifier
 	Formals []*Formal
+	Type    *TypeIdentifier
+	Body    Expression
 }
 
-func (m *Method) TokenLiteral() string { return m.Name.Value }
-func (m *Method) featureNode()         {}
+func (m *Method) TokenLiteral() string  { return m.Token.Literal }
+func (m *Method) GetToken() lexer.Token { return m.Token }
+func (m *Method) featureNode()          {}
 
 type Formal struct {
 	Name *ObjectIdentifier
@@ -200,3 +207,49 @@ type AssignExpression struct {
 
 func (ae *AssignExpression) expressionNode()      {}
 func (ae *AssignExpression) TokenLiteral() string { return ae.Token.Literal }
+
+// CaseExpression represents a case expression in the AST.
+type CaseExpression struct {
+	Token    lexer.Token
+	Subject  Expression
+	Branches []*CaseBranch
+}
+
+func (ce *CaseExpression) expressionNode()      {}
+func (ce *CaseExpression) TokenLiteral() string { return ce.Token.Literal }
+
+// CaseBranch represents a single branch in a case expression.
+type CaseBranch struct {
+	Variable   *ObjectIdentifier
+	Type       *TypeIdentifier
+	Expression Expression
+}
+
+// MethodCallExpression represents a method call
+type MethodCallExpression struct {
+	Token     lexer.Token
+	Object    Expression
+	Method    *ObjectIdentifier
+	Arguments []Expression
+}
+
+func (mc *MethodCallExpression) expressionNode()      {}
+func (mc *MethodCallExpression) TokenLiteral() string { return mc.Token.Literal }
+
+// SelfExpression represents the 'self' keyword
+type SelfExpression struct {
+	Token lexer.Token
+}
+
+func (se *SelfExpression) expressionNode()      {}
+func (se *SelfExpression) TokenLiteral() string { return se.Token.Literal }
+
+// DispatchExpression represents a method call without an explicit receiver
+type DispatchExpression struct {
+	Token     lexer.Token
+	Method    *ObjectIdentifier
+	Arguments []Expression
+}
+
+func (de *DispatchExpression) expressionNode()      {}
+func (de *DispatchExpression) TokenLiteral() string { return de.Token.Literal }
