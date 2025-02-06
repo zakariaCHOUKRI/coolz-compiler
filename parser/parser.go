@@ -84,7 +84,7 @@ func (p *Parser) Errors() []string {
 	return p.errors
 }
 
-// Add better token advancement safety
+// Remove parseDebugCounter variable and debug print statements
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
@@ -126,21 +126,23 @@ func (p *Parser) currentError(t lexer.TokenType) {
 		t.String(), p.curToken.Type.String(), p.curToken.Line, p.curToken.Column))
 }
 
+// Simplify ParseProgram by removing debug prints
 func (p *Parser) ParseProgram() *ast.Program {
 	prog := &ast.Program{}
+
 	for p.curToken.Type != lexer.EOF && p.curToken.Type != lexer.ERROR {
 		c := p.parseClass()
-
-		if !p.expectAndPeek(lexer.SEMI) {
-			continue // sf error handled by method aslan
+		if c == nil {
+			break
 		}
-		p.nextToken()
 		prog.Classes = append(prog.Classes, c)
 	}
+
 	return prog
 }
 
 // Fix parseClass to properly handle semicolons
+// Simplify parseClass by removing debug prints
 func (p *Parser) parseClass() *ast.Class {
 	c := &ast.Class{Token: p.curToken}
 

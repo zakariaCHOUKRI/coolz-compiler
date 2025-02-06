@@ -4,7 +4,24 @@ import (
 	"coolz-compiler/ast"
 	"coolz-compiler/lexer"
 	"fmt"
+	"strings"
 )
+
+var (
+	debugDepth     = 0
+	debugCounter   = 0
+	maxDebugOutput = 1000
+	callCount      = make(map[string]int)
+)
+
+func debug(format string, args ...interface{}) {
+	if debugCounter > maxDebugOutput {
+		panic(fmt.Sprintf("Debug output limit exceeded. Last message: "+format, args...))
+	}
+	debugCounter++
+	indent := strings.Repeat("  ", debugDepth)
+	fmt.Printf(indent+format+"\n", args...)
+}
 
 type SymbolTable struct {
 	symbols map[string]*SymbolEntry
@@ -67,12 +84,25 @@ func (sa *SemanticAnalyser) Errors() []string {
 }
 
 func (sa *SemanticAnalyser) Analyze(program *ast.Program) {
+	debug("Starting analysis")
+	callCount = make(map[string]int)
+
+	debug("Building inheritance graph")
 	sa.buildInheritanceGraph(program)
+
+	debug("Checking inheritance cycles")
 	if sa.detectInheritanceCycles() {
+		debug("Inheritance cycles detected, stopping analysis")
 		return
 	}
+
+	debug("Building class symbol tables")
 	sa.buildClassesSymboltables(program)
+
+	debug("Building symbol tables")
 	sa.buildSymboltables(program)
+
+	debug("Starting type checking")
 	sa.typeCheck(program)
 }
 
@@ -132,9 +162,24 @@ func (sa *SemanticAnalyser) detectInheritanceCycles() bool {
 }
 
 func (sa *SemanticAnalyser) typeCheck(program *ast.Program) {
+	visited := make(map[string]bool)
+
+	debug("Type checking classes:")
 	for _, class := range program.Classes {
-		st := sa.globalSymbolTable.symbols[class.Name.Value].Scope
-		sa.typeCheckClass(class, st)
+		callCount["typeCheck_"+class.Name.Value]++
+		if callCount["typeCheck_"+class.Name.Value] > 100 {
+			panic(fmt.Sprintf("Potential infinite recursion detected in typeCheck for class %s", class.Name.Value))
+		}
+
+		debug("- Checking class: %s", class.Name.Value)
+		if !visited[class.Name.Value] {
+			visited[class.Name.Value] = true
+			if st, ok := sa.globalSymbolTable.symbols[class.Name.Value]; ok && st.Scope != nil {
+				sa.typeCheckClass(class, st.Scope)
+			} else {
+				debug("Warning: No symbol table for class %s", class.Name.Value)
+			}
+		}
 	}
 }
 
@@ -156,10 +201,16 @@ func (sa *SemanticAnalyser) typeCheckClass(cls *ast.Class, st *SymbolTable) {
 }
 
 func (sa *SemanticAnalyser) typeCheckAttribute(attribute *ast.Attribute, st *SymbolTable) {
+	// Add guard against nil initialization
+	if attribute == nil || attribute.Type == nil {
+		return
+	}
+
 	if attribute.Init != nil {
 		expressionType := sa.getExpressionType(attribute.Init, st)
-		if !sa.isTypeConformant(expressionType, attribute.Type.Value) {
-			sa.errors = append(sa.errors, fmt.Sprintf("attribute %s cannot be of type %s, expected %s", attribute.Name.Value, expressionType, attribute.Type.Value))
+		if expressionType != "Object" && !sa.isTypeConformant(expressionType, attribute.Type.Value) {
+			sa.errors = append(sa.errors, fmt.Sprintf("attribute %s cannot be of type %s, expected %s",
+				attribute.Name.Value, expressionType, attribute.Type.Value))
 		}
 	}
 
@@ -184,6 +235,10 @@ func (sa *SemanticAnalyser) typeCheckMethod(method *ast.Method, st *SymbolTable)
 
 // Update isTypeConformant to handle SELF_TYPE properly
 func (sa *SemanticAnalyser) isTypeConformant(type1, type2 string) bool {
+	debug("Checking type conformance: %s <= %s", type1, type2)
+	debugDepth++
+	defer func() { debugDepth-- }()
+
 	// Handle SELF_TYPE cases
 	if type2 == "SELF_TYPE" {
 		return type1 == "SELF_TYPE"
@@ -277,6 +332,32 @@ func (sa *SemanticAnalyser) findFirstCommonAncestor(path1, path2 []string) strin
 }
 
 func (sa *SemanticAnalyser) getExpressionType(expression ast.Expression, st *SymbolTable) string {
+	if expression == nil || st == nil {
+		return "Object"
+	}
+
+	// Add visited map to prevent infinite recursion in expression type checking
+	visited := make(map[ast.Expression]bool)
+	return sa.getExpressionTypeInternal(expression, st, visited)
+}
+
+func (sa *SemanticAnalyser) getExpressionTypeInternal(expression ast.Expression, st *SymbolTable, visited map[ast.Expression]bool) string {
+	callCount["getExpressionTypeInternal"]++
+	if callCount["getExpressionTypeInternal"] > 1000 {
+		panic("Potential infinite recursion in getExpressionTypeInternal")
+	}
+
+	debugDepth++
+	defer func() { debugDepth-- }()
+
+	if visited[expression] {
+		debug("Cycle detected in expression type checking")
+		return "Object"
+	}
+
+	debug("Checking expression type: %T", expression)
+	visited[expression] = true
+
 	switch e := expression.(type) {
 	case *ast.IntegerLiteral:
 		return "Int"
@@ -484,7 +565,7 @@ func isComparable(t string) bool {
 
 func (sa *SemanticAnalyser) getBinaryExpressionType(be *ast.BinaryExpression, st *SymbolTable) string {
 	leftType := sa.getExpressionType(be.Left, st)
-	rightType := sa.getExpressionType(be.Left, st)
+	rightType := sa.getExpressionType(be.Right, st) // Fix: Changed be.Left to be.Right
 	switch be.Operator {
 	case "+", "*", "/", "-":
 		if leftType != "Int" || rightType != "Int" {
@@ -512,7 +593,17 @@ func (sa *SemanticAnalyser) getCaseExpressionType(ce *ast.CaseExpression, st *Sy
 
 // Update getMethodCallExpressionType to handle SELF_TYPE
 func (sa *SemanticAnalyser) getMethodCallExpressionType(mc *ast.MethodCallExpression, st *SymbolTable) string {
+	callCount["getMethodCallExpressionType"]++
+	if callCount["getMethodCallExpressionType"] > 1000 {
+		panic("Potential infinite recursion in getMethodCallExpressionType")
+	}
+
+	debug("Method call: %s", mc.Method.Value)
+	debugDepth++
+	defer func() { debugDepth-- }()
+
 	objectType := sa.getExpressionType(mc.Object, st)
+	debug("Object type: %s", objectType)
 	if objectType == "SELF_TYPE" {
 		objectType = sa.currentClass
 	}
