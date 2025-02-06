@@ -95,15 +95,28 @@ func TestNextToken(t *testing.T) {
 
 	for _, tt := range tests {
 		l := NewLexer(strings.NewReader(tt.input))
+
+		// Add debug information
+		var tokens []Token
 		for i, expTType := range tt.expectedTokenType {
 			tok := l.NextToken()
+			tokens = append(tokens, tok)
 
 			if tok.Type != expTType {
-				t.Fatalf("[%q]: Wrong token type %d-th Token. expected=%s, got %s", tt.input, i, expTType, tok.Type)
+				// Print the token sequence up to the error
+				t.Logf("\nToken sequence up to error:")
+				for j, token := range tokens {
+					t.Logf("%d: Type=%v, Literal='%s', Expected Type=%v",
+						j, token.Type, token.Literal, tt.expectedTokenType[j])
+				}
+
+				t.Fatalf("\n[%q]:\nError at token %d\nGot: Type=%v, Literal='%s'\nExpected: Type=%v, Literal='%s'",
+					tt.input, i, tok.Type, tok.Literal, expTType, tt.expectedLiteral[i])
 			}
 
 			if tok.Literal != tt.expectedLiteral[i] {
-				t.Fatalf("[%q]: Wrong literal at test %d-it Token. expected=%q, got %q", tt.input, i, tt.expectedLiteral[i], tok.Literal)
+				t.Fatalf("[%q]: Wrong literal at token %d. expected=%q, got=%q",
+					tt.input, i, tt.expectedLiteral[i], tok.Literal)
 			}
 		}
 	}

@@ -349,7 +349,7 @@ func (l *Lexer) NextToken() Token {
 		identifier := l.readIdentifier()
 		tok.Literal = identifier
 		switch strings.ToLower(identifier) {
-		// Handle keywords
+		// Handle case-insensitive keywords
 		case "class":
 			tok.Type = CLASS
 		case "if":
@@ -384,19 +384,13 @@ func (l *Lexer) NextToken() Token {
 			tok.Type = NEW
 		case "not":
 			tok.Type = NOT
-		case "self":
-			tok.Type = SELF
-		case "self_type":
-			tok.Type = SELF_TYPE
-		// Handle boolean const
+		// Handle boolean constants (case-insensitive)
 		case "true", "false":
 			tok.Type = BOOL_CONST
 		default:
 			if unicode.IsUpper(rune(identifier[0])) {
-				// Types are all starting with an upper case.
 				tok.Type = TYPEID
 			} else {
-				// If not a type then its an object.
 				tok.Type = OBJECTID
 			}
 		}
