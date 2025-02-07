@@ -129,15 +129,25 @@ func (p *Parser) currentError(t lexer.TokenType) {
 // Simplify ParseProgram by removing debug prints
 func (p *Parser) ParseProgram() *ast.Program {
 	prog := &ast.Program{}
-
 	for p.curToken.Type != lexer.EOF && p.curToken.Type != lexer.ERROR {
 		c := p.parseClass()
 		if c == nil {
-			break
+			// Skip until next semicolon or EOF
+			for !p.curTokenIs(lexer.SEMI) && p.curToken.Type != lexer.EOF {
+				p.nextToken()
+			}
+			if p.curTokenIs(lexer.SEMI) {
+				p.nextToken()
+			}
+			continue
 		}
 		prog.Classes = append(prog.Classes, c)
-	}
 
+		// Skip optional semicolon after the class
+		if p.curTokenIs(lexer.SEMI) {
+			p.nextToken()
+		}
+	}
 	return prog
 }
 
@@ -392,35 +402,22 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		p.noPrefixParseFnError(p.curToken.Type)
 		return nil
 	}
-
 	leftExp := prefix()
 	if leftExp == nil {
 		return nil
 	}
 
-	// Add a safety counter to prevent infinite loops
-	loopCount := 0
-	maxLoops := 100
-
 	for !p.curTokenIs(lexer.SEMI) && !p.curTokenIs(lexer.EOF) && precedence < p.peekPrecedence() {
-		loopCount++
-		if loopCount > maxLoops {
-			return leftExp
-		}
-
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			break
 		}
-
 		p.nextToken()
-		newExp := infix(leftExp)
-		if newExp == nil {
-			return leftExp // Return what we have so far instead of nil
+		leftExp = infix(leftExp)
+		if leftExp == nil {
+			break
 		}
-		leftExp = newExp
 	}
-
 	return leftExp
 }
 
