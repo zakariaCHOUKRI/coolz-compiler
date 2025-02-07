@@ -2,12 +2,15 @@ package main
 
 import (
 	"coolz-compiler/ast"
+	"coolz-compiler/codegen"
 	"coolz-compiler/irgen"
+	"coolz-compiler/optimizer"
 	"fmt"
 	"os"
 )
 
 func main() {
+	// Create AST
 	program := &ast.Program{
 		Classes: []*ast.Class{
 			{
@@ -23,6 +26,7 @@ func main() {
 		},
 	}
 
+	// Generate LLVM IR
 	generator := irgen.NewIRGenerator()
 	module, err := generator.Generate(program)
 	if err != nil {
@@ -30,16 +34,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Print the generated LLVM IR
-	fmt.Println(module.String())
-
-	// Optionally, write to a file
-	file, err := os.Create("output.ll")
+	// Optimize the IR
+	opt := optimizer.NewOptimizer()
+	opt.SetLevel(optimizer.MediumOptimization) // Access constant directly from package
+	module, err = opt.Optimize(module)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating output file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error optimizing IR: %v\n", err)
 		os.Exit(1)
 	}
-	defer file.Close()
 
-	file.WriteString(module.String())
+	// Generate machine code
+	codegen := codegen.NewCodeGenerator(
+		codegen.DefaultTarget(),
+		"build",
+	)
+
+	if err := codegen.Generate(module); err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
+		os.Exit(1)
+	}
 }
