@@ -171,13 +171,16 @@ func (sa *SemanticAnalyser) getExpressionType(expression ast.Expression, st *Sym
 }
 
 func (sa *SemanticAnalyser) getWhileExpressionType(wexpr *ast.WhileExpression, st *SymbolTable) string {
+	fmt.Println("Debug: Entering getWhileExpressionType") // Add debug print
 	conditionType := sa.getExpressionType(wexpr.Condition, st)
 	if conditionType != "Bool" {
-		sa.errors = append(sa.errors, fmt.Sprintf("condition of if statement is of type %s, expected Bool", conditionType))
+		sa.errors = append(sa.errors, fmt.Sprintf("condition of while statement is of type %s, expected Bool", conditionType))
 		return "Object"
 	}
 
-	return sa.getExpressionType(wexpr.Body, st)
+	// While expression always returns Object in COOL
+	_ = sa.getExpressionType(wexpr.Body, st) // Check the body but ignore its type
+	return "Object"
 }
 
 func (sa *SemanticAnalyser) getBlockExpressionType(bexpr *ast.BlockExpression, st *SymbolTable) string {
@@ -312,6 +315,7 @@ func isComparable(t string) bool {
 }
 
 func (sa *SemanticAnalyser) GetBinaryExpressionType(be *ast.BinaryExpression, st *SymbolTable) string {
+	fmt.Println("Debug: Checking binary expr:", be.Operator) // Add debug print
 	leftType := sa.getExpressionType(be.Left, st)
 	rightType := sa.getExpressionType(be.Left, st)
 	switch be.Operator {

@@ -80,6 +80,11 @@ func New(l *lexer.Lexer) *Parser {
 	return p
 }
 
+func NewParserFromInput(input string) *Parser {
+	l := lexer.NewLexer(strings.NewReader(input))
+	return New(l)
+}
+
 func (p *Parser) Errors() []string {
 	return p.errors
 }
@@ -605,20 +610,32 @@ func (p *Parser) parseWhileExpression() ast.Expression {
 	p.nextToken() // consume "while"
 
 	exp.Condition = p.parseExpression(LOWEST)
-
-	if !p.peekTokenIs(lexer.LOOP) {
+	if exp.Condition == nil {
 		return nil
 	}
-	p.nextToken() // consume "loop"
-	p.nextToken() // move past "loop"
+
+	if !p.curTokenIs(lexer.LOOP) && !p.peekTokenIs(lexer.LOOP) {
+		p.peekError(lexer.LOOP)
+		return nil
+	}
+	if p.peekTokenIs(lexer.LOOP) {
+		p.nextToken()
+	}
+	p.nextToken() // move past 'loop'
 
 	exp.Body = p.parseExpression(LOWEST)
-
-	if !p.peekTokenIs(lexer.POOL) {
+	if exp.Body == nil {
 		return nil
 	}
-	p.nextToken() // consume "pool"
-	p.nextToken() // move past "pool"
+
+	if !p.curTokenIs(lexer.POOL) && !p.peekTokenIs(lexer.POOL) {
+		p.peekError(lexer.POOL)
+		return nil
+	}
+	if p.peekTokenIs(lexer.POOL) {
+		p.nextToken()
+	}
+	p.nextToken() // move past 'pool'
 
 	return exp
 }
