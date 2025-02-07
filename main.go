@@ -1,71 +1,45 @@
-// package main
-
-// import (
-// 	"coolz-compiler/lexer"
-// 	"coolz-compiler/parser"
-// 	"flag"
-// 	"fmt"
-// 	"os"
-// 	"strings"
-// )
-
-// func main() {
-
-// 	inputFilePath := flag.String("i", "", "Path to your program")
-// 	flag.Parse()
-
-// 	if *inputFilePath == "" {
-// 		fmt.Println("Error: Input file path is required.")
-// 		os.Exit(1)
-// 	}
-
-// 	code, err := os.ReadFile(*inputFilePath)
-// 	if err != nil {
-// 		fmt.Printf("Error reading input file: %v\n", err)
-// 		os.Exit(1)
-// 	}
-
-// 	l := lexer.NewLexer(strings.NewReader(string(code)))
-// 	p := parser.New(l)
-// 	_ = p.ParseProgram()
-
-// 	if len(p.Errors()) > 0 {
-// 		fmt.Println("Parsing Errors:")
-// 		for _, msg := range p.Errors() {
-// 			fmt.Println(msg)
-// 		}
-// 		os.Exit(1)
-// 	}
-
-// 	fmt.Println("Done compiling!")
-// }
-
 package main
 
 import (
+	"coolz-compiler/ast"
+	"coolz-compiler/irgen"
 	"fmt"
-	"log"
 	"os"
-
-	"coolz-compiler/lexer"
 )
 
 func main() {
-	file, err := os.Open("example.cl")
+	program := &ast.Program{
+		Classes: []*ast.Class{
+			{
+				Name: &ast.TypeIdentifier{Value: "Main"},
+				Features: []ast.Feature{
+					&ast.Method{
+						Name: &ast.ObjectIdentifier{Value: "main"},
+						Type: &ast.TypeIdentifier{Value: "Int"},
+						Body: &ast.IntegerLiteral{Value: 42},
+					},
+				},
+			},
+		},
+	}
+
+	generator := irgen.NewIRGenerator()
+	module, err := generator.Generate(program)
 	if err != nil {
-		log.Fatalf("failed to open file: %s", err)
+		fmt.Fprintf(os.Stderr, "Error generating IR: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print the generated LLVM IR
+	fmt.Println(module.String())
+
+	// Optionally, write to a file
+	file, err := os.Create("output.ll")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating output file: %v\n", err)
+		os.Exit(1)
 	}
 	defer file.Close()
 
-	// Create a new lexer
-	l := lexer.NewLexer(file)
-
-	// Tokenize the input and print each token
-	for {
-		tok := l.NextToken()
-		fmt.Printf("Token: Type=%s, Literal=%s, Line=%d, Column=%d\n", tok.Type, tok.Literal, tok.Line, tok.Column)
-		if tok.Type == lexer.EOF {
-			break
-		}
-	}
+	file.WriteString(module.String())
 }
