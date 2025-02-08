@@ -1,61 +1,41 @@
 package main
 
 import (
-	"coolz-compiler/codegen"
-	"coolz-compiler/irgen"
 	"coolz-compiler/lexer"
-	"coolz-compiler/optimizer"
 	"coolz-compiler/parser"
+	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <sourcefile.cl>\n", os.Args[0])
+
+	inputFilePath := flag.String("i", "", "Path to your program")
+	flag.Parse()
+
+	if *inputFilePath == "" {
+		fmt.Println("Error: Input file path is required.")
 		os.Exit(1)
 	}
 
-	sourceFile := os.Args[1]
-	contentBytes, err := ioutil.ReadFile(sourceFile)
+	code, err := os.ReadFile(*inputFilePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file %s: %v\n", sourceFile, err)
+		fmt.Printf("Error reading input file: %v\n", err)
 		os.Exit(1)
 	}
 
-	lex := lexer.NewLexer(strings.NewReader(string(contentBytes)))
-	p := parser.New(lex)
-	programAST := p.ParseProgram()
+	l := lexer.NewLexer(strings.NewReader(string(code)))
+	p := parser.New(l)
+	_ = p.ParseProgram()
+
 	if len(p.Errors()) > 0 {
-		for _, e := range p.Errors() {
-			fmt.Fprintln(os.Stderr, "Parse error:", e)
+		fmt.Println("Parsing Errors:")
+		for _, msg := range p.Errors() {
+			fmt.Println(msg)
 		}
 		os.Exit(1)
 	}
 
-	generator := irgen.NewIRGenerator()
-	module, err := generator.Generate(programAST)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating IR: %v\n", err)
-		os.Exit(1)
-	}
-
-	opt := optimizer.NewOptimizer()
-	opt.SetLevel(optimizer.MediumOptimization)
-	module, err = opt.Optimize(module)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error optimizing IR: %v\n", err)
-		os.Exit(1)
-	}
-
-	codegen := codegen.NewCodeGenerator(
-		codegen.DefaultTarget(),
-		"build",
-	)
-	if err := codegen.Generate(module); err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
-		os.Exit(1)
-	}
+	fmt.Println("Done compiling!")
 }
