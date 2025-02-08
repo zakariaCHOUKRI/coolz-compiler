@@ -72,7 +72,7 @@ func (tt TokenType) String() string {
 	return [...]string{"EOF", "ERROR", "CLASS", "INHERITS", "ISVOID", "IF", "ELSE", "FI", "THEN", "LET", "IN", "WHILE", "CASE", "ESCA", "LOOP", "POOL",
 		"NEW", "OF", "NOT", "SELF", "SELF_TYPE", // Add SELF and SELF_TYPE to string mapping
 		"STR_CONST", "BOOL_CONST", "INT_CONST", "TYPEID", "OBJECTID", "ASSIGN", "DARROW", "LT", "LE", "EQ", "PLUS", "MINUS", "TIMES",
-		"DIVIDE", "LPAREN", "RPAREN", "LBRACE", "RBACE", "SEMI", "COLON", "COMMA", "DOT", "AT", "NEG"}[tt]
+		"DIVIDE", "LPAREN", "RPAREN", "LBRACE", "RBRACE", "SEMI", "COLON", "COMMA", "DOT", "AT", "NEG"}[tt]
 }
 
 // Token represents a lexical token with its type, value, and position.
