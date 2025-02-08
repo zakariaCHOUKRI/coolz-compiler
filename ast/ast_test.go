@@ -75,19 +75,28 @@ func TestBinaryExpression(t *testing.T) {
 }
 
 func TestLetExpression(t *testing.T) {
-	letDecl := &LetDeclaration{
-		Name: &ObjectIdentifier{Token: lexer.Token{Type: lexer.OBJECTID, Literal: "x"}, Value: "x"},
-		Type: &TypeIdentifier{Token: lexer.Token{Type: lexer.TYPEID, Literal: "Int"}, Value: "Int"},
-		Init: &IntegerLiteral{Value: 42},
-	}
-
 	letExpr := &Let{
-		Declarations: []*LetDeclaration{letDecl},
-		Body:         &ObjectIdentifier{Token: lexer.Token{Type: lexer.OBJECTID, Literal: "x"}, Value: "x"},
+		VarName: &ObjectIdentifier{
+			Token: lexer.Token{Type: lexer.OBJECTID, Literal: "x"},
+			Value: "x",
+		},
+		VarType: &TypeIdentifier{
+			Token: lexer.Token{Type: lexer.TYPEID, Literal: "Int"},
+			Value: "Int",
+		},
+		VarInit: &IntegerLiteral{Value: 42},
+		Body: &ObjectIdentifier{
+			Token: lexer.Token{Type: lexer.OBJECTID, Literal: "x"},
+			Value: "x",
+		},
 	}
 
-	if len(letExpr.Declarations) != 1 {
-		t.Fatalf("Let should have 1 declaration, got %d", len(letExpr.Declarations))
+	if letExpr.VarName.Value != "x" {
+		t.Errorf("let.VarName.Value not 'x'. got=%s", letExpr.VarName.Value)
+	}
+
+	if letExpr.VarType.Value != "Int" {
+		t.Errorf("let.VarType.Value not 'Int'. got=%s", letExpr.VarType.Value)
 	}
 }
 
@@ -129,20 +138,28 @@ func TestAttributeNode(t *testing.T) {
 }
 
 func TestConditionalNode(t *testing.T) {
-	condToken := lexer.Token{Type: lexer.IF, Literal: "if"}
-	condition := &BooleanLiteral{Value: true}
-	thenBranch := &IntegerLiteral{Value: 1}
-	elseBranch := &IntegerLiteral{Value: 0}
-
 	conditional := &Conditional{
-		Token:      condToken,
-		Condition:  condition,
-		ThenBranch: thenBranch,
-		ElseBranch: elseBranch,
+		Token: lexer.Token{Type: lexer.IF, Literal: "if"},
+		Predicate: &BooleanLiteral{
+			Token: lexer.Token{Type: lexer.BOOL_CONST, Literal: "true"},
+			Value: true,
+		},
+		ThenBranch: &IntegerLiteral{
+			Token: lexer.Token{Type: lexer.INT_CONST, Literal: "1"},
+			Value: 1,
+		},
+		ElseBranch: &IntegerLiteral{
+			Token: lexer.Token{Type: lexer.INT_CONST, Literal: "0"},
+			Value: 0,
+		},
 	}
 
-	if conditional.Condition != condition {
-		t.Errorf("Conditional.Condition = %v, want %v", conditional.Condition, condition)
+	if conditional.Predicate == nil {
+		t.Error("conditional.Predicate is nil")
+	}
+
+	if conditional.TokenLiteral() != "if" {
+		t.Errorf("conditional.TokenLiteral not 'if'. got=%q", conditional.TokenLiteral())
 	}
 }
 
@@ -209,16 +226,16 @@ func TestIsVoidNode(t *testing.T) {
 }
 
 func TestUnaryExpressionNode(t *testing.T) {
-	unaryToken := lexer.Token{Type: lexer.NEG, Literal: "~"}
-	expr := &IntegerLiteral{Value: 42}
-
 	unaryExpr := &UnaryExpression{
-		Token:    unaryToken,
+		Token:    lexer.Token{Type: lexer.NEG, Literal: "~"},
 		Operator: lexer.NEG,
-		Right:    expr,
+		Right: &IntegerLiteral{
+			Token: lexer.Token{Type: lexer.INT_CONST, Literal: "5"},
+			Value: 5,
+		},
 	}
 
-	if unaryExpr.Right != expr {
-		t.Errorf("UnaryExpression.Right = %v, want %v", unaryExpr.Right, expr)
+	if unaryExpr.TokenLiteral() != "~" {
+		t.Errorf("unaryExpr.TokenLiteral not '~'. got=%q", unaryExpr.TokenLiteral())
 	}
 }

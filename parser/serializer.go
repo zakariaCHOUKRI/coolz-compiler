@@ -2,8 +2,8 @@ package parser
 
 import (
 	"coolz-compiler/ast"
-	"coolz-compiler/lexer"
 	"fmt"
+	"strings"
 )
 
 func SerializeExpression(expr ast.Expression) string {
@@ -17,87 +17,45 @@ func SerializeExpression(expr ast.Expression) string {
 	case *ast.StringLiteral:
 		return fmt.Sprintf("%q", e.Value)
 	case *ast.BooleanLiteral:
-		return fmt.Sprintf("%v", e.Value)
+		if e.Value {
+			return "true"
+		}
+		return "false"
 	case *ast.ObjectIdentifier:
 		return e.Value
+	case *ast.UnaryExpression:
+		return fmt.Sprintf("(%s %s)", e.Operator, SerializeExpression(e.Right))
 	case *ast.BinaryExpression:
-		opStr := ""
-		switch e.Operator {
-		case lexer.PLUS:
-			opStr = "+"
-		case lexer.MINUS:
-			opStr = "-"
-		case lexer.TIMES:
-			opStr = "*"
-		case lexer.DIVIDE:
-			opStr = "/"
-		case lexer.LT:
-			opStr = "<"
-		case lexer.LE:
-			opStr = "<="
-		case lexer.EQ:
-			opStr = "="
-		case lexer.ASSIGN:
-			opStr = "<-"
-		default:
-			opStr = fmt.Sprint(e.Operator)
-		}
 		return fmt.Sprintf("(%s %s %s)",
 			SerializeExpression(e.Left),
-			opStr,
+			e.Operator,
 			SerializeExpression(e.Right))
-	case *ast.UnaryExpression:
-		opStr := ""
-		switch e.Operator {
-		case lexer.NEG:
-			opStr = "~"
-		case lexer.NOT:
-			opStr = "not"
-		default:
-			opStr = fmt.Sprint(e.Operator)
-		}
-		rightExpr := SerializeExpression(e.Right)
-		if rightExpr == "" {
-			return ""
-		}
-		return fmt.Sprintf("(%s %s)", opStr, rightExpr)
-	case *ast.IsVoid:
-		return fmt.Sprintf("isvoid %s",
-			SerializeExpression(e.Expr))
-	case *ast.New:
-		return fmt.Sprintf("new %s", e.Type.Value)
-	case *ast.Block:
-		result := "{ "
-		for i, expr := range e.Expressions {
-			if i > 0 {
-				result += "; "
-			}
-			result += SerializeExpression(expr)
-		}
-		return result + "; }"
 	case *ast.Conditional:
 		return fmt.Sprintf("if %s then %s else %s fi",
-			SerializeExpression(e.Condition),
+			SerializeExpression(e.Predicate),
 			SerializeExpression(e.ThenBranch),
 			SerializeExpression(e.ElseBranch))
 	case *ast.Loop:
 		return fmt.Sprintf("while %s loop %s pool",
 			SerializeExpression(e.Condition),
 			SerializeExpression(e.Body))
-	case *ast.Let:
-		result := "let "
-		for i, decl := range e.Declarations {
-			if i > 0 {
-				result += ", "
-			}
-			result += fmt.Sprintf("%s : %s", decl.Name.Value, decl.Type.Value)
-			if decl.Init != nil {
-				result += fmt.Sprintf(" <- %s", SerializeExpression(decl.Init))
-			}
+	case *ast.Block:
+		exprs := make([]string, len(e.Expressions))
+		for i, expr := range e.Expressions {
+			exprs[i] = SerializeExpression(expr)
 		}
-		result += fmt.Sprintf(" in %s", SerializeExpression(e.Body))
-		return result
+		return fmt.Sprintf("{ %s }", strings.Join(exprs, "; "))
+	case *ast.Let:
+		return fmt.Sprintf("let %s : %s <- %s in %s",
+			e.VarName.Value,
+			e.VarType.Value,
+			SerializeExpression(e.VarInit),
+			SerializeExpression(e.Body))
+	case *ast.New:
+		return fmt.Sprintf("new %s", e.Type.Value)
+	case *ast.IsVoid:
+		return fmt.Sprintf("isvoid %s", SerializeExpression(e.Expr))
 	default:
-		return fmt.Sprintf("<unknown expression type: %T>", expr)
+		return fmt.Sprintf("<unknown:%T>", expr)
 	}
 }

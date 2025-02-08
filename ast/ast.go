@@ -137,7 +137,7 @@ func (d *Dispatch) expressionNode()      {}
 
 type Conditional struct {
 	Token      lexer.Token
-	Condition  Expression
+	Predicate  Expression
 	ThenBranch Expression
 	ElseBranch Expression
 }
@@ -170,9 +170,11 @@ type LetDeclaration struct {
 }
 
 type Let struct {
-	Token        lexer.Token
-	Declarations []*LetDeclaration
-	Body         Expression
+	Token   lexer.Token
+	VarName *ObjectIdentifier
+	VarType *TypeIdentifier
+	VarInit Expression
+	Body    Expression
 }
 
 func (l *Let) TokenLiteral() string { return l.Token.Literal }

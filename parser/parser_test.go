@@ -124,15 +124,15 @@ func TestMethodParsing(t *testing.T) {
 		expectedMethodType  string
 	}{
 		{
-			input:               "Main(): Void {};",
-			expectedMethodName:  "Main",
+			input:               "main(): Void {};",
+			expectedMethodName:  "main",
 			expectedFormalNames: []string{},
 			expectedFormalTypes: []string{},
 			expectedMethodType:  "Void",
 		},
 		{
-			input:               "Sum(a:Integer,b:Integer): Integer {};",
-			expectedMethodName:  "Sum",
+			input:               "sum(a:Integer,b:Integer): Integer {};",
+			expectedMethodName:  "sum",
 			expectedFormalNames: []string{"a", "b"},
 			expectedFormalTypes: []string{"Integer", "Integer"},
 			expectedMethodType:  "Integer",
