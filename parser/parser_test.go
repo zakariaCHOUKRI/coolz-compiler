@@ -53,7 +53,7 @@ func TestClassParser(t *testing.T) {
 
 	for i, tt := range tests {
 		parser := newParserFromInput(tt.input)
-		class := parser.parseClass()
+		class := parser.ParseClass()
 
 		checkParserErrors(t, parser, i)
 
@@ -108,8 +108,8 @@ func TestFormalParsing(t *testing.T) {
 			if formal.Name.Value != tt.expectedNames[i] {
 				t.Fatalf("[%q]: expected formal name to be %q got %q", tt.input, tt.expectedNames[i], formal.Name.Value)
 			}
-			if formal.TypeDecl.Value != tt.expectedTypes[i] {
-				t.Fatalf("[%q]: expected formal type to be %q got %q", tt.input, tt.expectedNames[i], formal.Name.Value)
+			if formal.Type.Value != tt.expectedTypes[i] {
+				t.Fatalf("[%q]: expected formal type to be %q got %q", tt.input, tt.expectedTypes[i], formal.Type.Value)
 			}
 		}
 	}
@@ -152,13 +152,13 @@ func TestMethodParsing(t *testing.T) {
 			if formal.Name.Value != tt.expectedFormalNames[i] {
 				t.Fatalf("[%q]: Expected formal name to be %q found %q", tt.input, tt.expectedFormalNames[i], formal.Name.Value)
 			}
-			if formal.TypeDecl.Value != tt.expectedFormalTypes[i] {
-				t.Fatalf("[%q]: Expected formal type to be %q found %q", tt.input, tt.expectedFormalTypes[i], formal.TypeDecl.Value)
+			if formal.Type.Value != tt.expectedFormalTypes[i] {
+				t.Fatalf("[%q]: Expected formal type to be %q found %q", tt.input, tt.expectedFormalTypes[i], formal.Type.Value)
 			}
 		}
 
-		if method.TypeDecl.Value != tt.expectedMethodType {
-			t.Fatalf("[%q]: Expected method type to be %q found %q", tt.input, tt.expectedMethodType, method.TypeDecl.Value)
+		if method.ReturnType.Value != tt.expectedMethodType {
+			t.Fatalf("[%q]: Expected method type to be %q found %q", tt.input, tt.expectedMethodType, method.ReturnType.Value)
 		}
 	}
 }
@@ -176,7 +176,7 @@ func TestAttributeParsing(t *testing.T) {
 			expectedType: "String",
 		},
 		{
-			input:        "age:Integer<-0",
+			input:        "age:Integer<-30",
 			expectedName: "age",
 			expectedType: "Integer",
 		},
@@ -190,13 +190,13 @@ func TestAttributeParsing(t *testing.T) {
 		if attribute.Name.Value != tt.expectedName {
 			t.Fatalf("[%q]: Expected attribute name to be %q got %q", tt.input, tt.expectedName, attribute.Name.Value)
 		}
-		if attribute.TypeDecl.Value != tt.expectedType {
-			t.Fatalf("[%q]: Expected attribute type to be %q got %q", tt.input, tt.expectedType, attribute.TypeDecl.Value)
+		if attribute.Type.Value != tt.expectedType {
+			t.Fatalf("[%q]: Expected attribute type to be %q got %q", tt.input, tt.expectedType, attribute.Type.Value)
 		}
 	}
 }
 
-func TestExpressionParssing(t *testing.T) {
+func TestExpressionParsing(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -215,23 +215,23 @@ func TestExpressionParssing(t *testing.T) {
 		{"1 * 2", "(1 * 2)"},
 		{"isvoid 1", "isvoid 1"},
 		{"1 / 2", "(1 / 2)"},
-		// TODO: Implement parenthesis parsing
-		// {"(1 + 2)", "(1 + 2)"},
+		{"(1 + 2)", "(1 + 2)"},
 		{"new Object", "new Object"},
 		{"x <- 5", "(x <- 5)"},
 		{"if true then 1 else 2 fi", "if true then 1 else 2 fi"},
 		{"while true loop 1 pool", "while true loop 1 pool"},
+		{"{ 1; 2; 3; }", "{ 1; 2; 3; }"},
+		{"let x: Int <- 5 in x + 1", "let x : Int <- 5 in (x + 1)"},
 	}
 
 	for i, tt := range tests {
 		p := newParserFromInput(tt.input)
 		checkParserErrors(t, p, i)
 
-		expression := p.parseExpression(START)
+		expression := p.parseExpression()
 		actual := SerializeExpression(expression)
 		if actual != tt.expected {
 			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
 		}
 	}
-
 }
