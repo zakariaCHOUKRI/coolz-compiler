@@ -71,6 +71,23 @@ The compiler will:
 .\build\output.exe
 ```
 
+## Example Using IO
+
+Here's an example demonstrating basic IO usage:
+
+```cool
+class Main inherits IO {
+    main() : Object {
+        {
+            out_string("Enter a number: ");
+            let x : Int <- in_int() in {
+                out_string("You entered: ").out_int(x).out_string("\n");
+            };
+        }
+    };
+};
+```
+
 ## Project Structure
 
 ```

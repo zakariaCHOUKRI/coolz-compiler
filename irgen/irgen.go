@@ -6,7 +6,7 @@ import (
 
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/constant"
-	"github.com/llir/llvm/ir/enum" // Add this import
+	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
@@ -20,8 +20,6 @@ type IRGenerator struct {
 	classVTables map[string]*ir.Global
 	stringCache  map[string]*ir.Global
 }
-
-// Remove builder field and its initialization since llir/llvm doesn't have a Builder
 
 func NewIRGenerator() *IRGenerator {
 	return &IRGenerator{
@@ -84,6 +82,11 @@ func (g *IRGenerator) defineBuiltinTypes() {
 	)
 	g.classTypes["Bool"] = boolType
 	g.module.NewTypeDef("Bool", boolType)
+
+	// IO type
+	ioType := types.NewStruct(vtablePtr)
+	g.classTypes["IO"] = ioType
+	g.module.NewTypeDef("IO", ioType)
 }
 
 func (g *IRGenerator) generateClassType(class *ast.Class) error {
@@ -130,6 +133,9 @@ func (g *IRGenerator) generateClassMethods(class *ast.Class) error {
 
 			// Create function
 			funcName := fmt.Sprintf("%s_%s", className, method.Name.Value)
+			if g.functionExists(funcName) {
+				continue // Function already declared, skip
+			}
 			f := g.module.NewFunc(funcName, returnTyp, params...)
 
 			// Generate method body
@@ -145,21 +151,60 @@ func (g *IRGenerator) generateClassMethods(class *ast.Class) error {
 }
 
 func (g *IRGenerator) generateMainFunction() error {
-	mainType := types.NewPointer(g.classTypes["Object"])
 	main := g.module.NewFunc("main", types.I32)
-	block := main.NewBlock("")
+	block := main.NewBlock("entry")
 	g.currentBlock = block
 
 	// Create Main object and call Main.main()
 	mainClass := g.getOrDeclareRuntime("Main_new")
 	mainObj := block.NewCall(mainClass)
-	mainMain := g.module.NewFunc("Main_main", mainType)
-	block.NewCall(mainMain, mainObj)
 
-	// Return 0
+	// Use an existing Main_main rather than redefining it
+	mainMain := g.getFunction("Main_main")
+	if mainMain == nil {
+		return fmt.Errorf("main_main is not defined")
+	}
+	mainRet := block.NewCall(mainMain, mainObj)
+
+	// Declare or get the print_int function
+	printIntFunc := g.getOrDeclarePrintInt()
+
+	// Cast returned %Object* to Int*
+	intPtr := block.NewBitCast(mainRet, types.NewPointer(g.classTypes["Int"]))
+
+	// GEP to the integer field (index 1)
+	indices := []value.Value{
+		constant.NewInt(types.I32, 0),
+		constant.NewInt(types.I32, 1),
+	}
+	valPtr := block.NewGetElementPtr(g.classTypes["Int"], intPtr, indices...)
+	val := block.NewLoad(types.I32, valPtr)
+
+	// Print the integer
+	block.NewCall(printIntFunc, val)
+
 	block.NewRet(constant.NewInt(types.I32, 0))
-
 	return nil
+}
+
+// Add a helper to retrieve existing functions by name
+func (g *IRGenerator) getFunction(name string) *ir.Func {
+	for _, f := range g.module.Funcs {
+		if f.Name() == name {
+			return f
+		}
+	}
+	return nil
+}
+
+func (g *IRGenerator) getOrDeclarePrintInt() *ir.Func {
+	for _, f := range g.module.Funcs {
+		if f.Name() == "print_int" {
+			return f
+		}
+	}
+	f := g.module.NewFunc("print_int", types.Void, ir.NewParam("n", types.I32))
+	return f
 }
 
 func (g *IRGenerator) typeFromString(typeName string) types.Type {
@@ -266,6 +311,20 @@ func (g *IRGenerator) getOrDeclareRuntime(name string) *ir.Func {
 		f.Linkage = enum.LinkageExternal // Use proper enum value
 	case "Bool_new":
 		f = g.module.NewFunc(name, types.NewPointer(g.classTypes["Bool"]))
+	case "IO_out_string":
+		f = g.module.NewFunc(name, types.NewPointer(g.classTypes["IO"]),
+			ir.NewParam("self", types.NewPointer(g.classTypes["IO"])),
+			ir.NewParam("x", types.NewPointer(g.classTypes["String"])))
+	case "IO_out_int":
+		f = g.module.NewFunc(name, types.NewPointer(g.classTypes["IO"]),
+			ir.NewParam("self", types.NewPointer(g.classTypes["IO"])),
+			ir.NewParam("x", types.NewPointer(g.classTypes["Int"])))
+	case "IO_in_string":
+		f = g.module.NewFunc(name, types.NewPointer(g.classTypes["String"]),
+			ir.NewParam("self", types.NewPointer(g.classTypes["IO"])))
+	case "IO_in_int":
+		f = g.module.NewFunc(name, types.NewPointer(g.classTypes["Int"]),
+			ir.NewParam("self", types.NewPointer(g.classTypes["IO"])))
 	default:
 		// For class constructors
 		if classType, ok := g.classTypes[name[:len(name)-4]]; ok { // Remove "_new" suffix
@@ -274,4 +333,13 @@ func (g *IRGenerator) getOrDeclareRuntime(name string) *ir.Func {
 	}
 
 	return f
+}
+
+func (g *IRGenerator) functionExists(name string) bool {
+	for _, f := range g.module.Funcs {
+		if f.Name() == name {
+			return true
+		}
+	}
+	return false
 }
