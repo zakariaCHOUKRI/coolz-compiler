@@ -137,56 +137,56 @@ func (p *Parser) ParseClass() *ast.Class {
 }
 
 func (p *Parser) parseFeature() ast.Feature {
-	if p.peekTokenIs(lexer.LPAREN) {
-		return p.parseMethod()
+	switch p.curToken.Type {
+	case lexer.OBJECTID:
+		if p.peekTokenIs(lexer.LPAREN) {
+			return p.parseMethod()
+		}
+		return p.parseAttribute()
+	default:
+		p.errors = append(p.errors, fmt.Sprintf("unexpected token: %s", p.curToken.Type))
+		return nil
 	}
-	return p.parseAttribute()
 }
 
 func (p *Parser) parseMethod() *ast.Method {
-	m := &ast.Method{Token: p.curToken}
+	method := &ast.Method{Token: p.curToken}
 
-	// Store the name token before advancing
-	nameToken := p.curToken
-
-	// Parse method name (OBJECTID)
+	// Parse method name
 	if !p.curTokenIs(lexer.OBJECTID) {
 		p.currentError(lexer.OBJECTID)
 		return nil
 	}
-	m.Name = &ast.ObjectIdentifier{Token: nameToken, Value: nameToken.Literal}
+	method.Name = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken()
 
-	// Parse opening parenthesis
+	// Parse parameter list
 	if !p.curTokenIs(lexer.LPAREN) {
 		p.currentError(lexer.LPAREN)
 		return nil
 	}
 	p.nextToken()
 
-	// Parse formals (parameters)
-	m.Formals = p.parseFormals()
+	method.Formals = p.parseFormals()
 
-	// Parse closing parenthesis
 	if !p.curTokenIs(lexer.RPAREN) {
 		p.currentError(lexer.RPAREN)
 		return nil
 	}
 	p.nextToken()
 
-	// Parse colon
+	// Parse return type
 	if !p.curTokenIs(lexer.COLON) {
 		p.currentError(lexer.COLON)
 		return nil
 	}
 	p.nextToken()
 
-	// Parse return type
 	if !p.curTokenIs(lexer.TYPEID) {
 		p.currentError(lexer.TYPEID)
 		return nil
 	}
-	m.ReturnType = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	method.ReturnType = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken()
 
 	// Parse method body
@@ -196,17 +196,20 @@ func (p *Parser) parseMethod() *ast.Method {
 	}
 	p.nextToken()
 
-	// Parse body expression
-	m.Body = p.parseExpression()
-
-	// Parse closing brace
-	if !p.curTokenIs(lexer.RBRACE) {
-		p.currentError(lexer.RBRACE)
-		return nil
+	// Handle empty method body
+	if p.curTokenIs(lexer.RBRACE) {
+		method.Body = &ast.Block{
+			Token:       p.curToken,
+			Expressions: []ast.Expression{},
+		}
+		p.nextToken()
+		return method
 	}
-	p.nextToken()
 
-	return m
+	// Parse method body expressions
+	method.Body = p.parseBlockExpression()
+
+	return method
 }
 
 func (p *Parser) parseAttribute() *ast.Attribute {
@@ -300,238 +303,275 @@ func (p *Parser) parseFormal() *ast.Formal {
 }
 
 func (p *Parser) parseExpression() ast.Expression {
-	var left ast.Expression
-
-	switch p.curToken.Type {
-	case lexer.INT_CONST:
-		val, _ := strconv.ParseInt(p.curToken.Literal, 10, 64)
-		left = &ast.IntegerLiteral{Token: p.curToken, Value: val}
-		p.nextToken()
-	case lexer.STR_CONST:
-		left = &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
-		p.nextToken()
-	case lexer.TRUE, lexer.FALSE:
-		left = &ast.BooleanLiteral{Token: p.curToken, Value: p.curToken.Type == lexer.TRUE}
-		p.nextToken()
-	case lexer.OBJECTID:
-		left = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-		p.nextToken()
-	case lexer.NOT:
-		left = p.parseNotExpression()
-	case lexer.NEG:
-		left = &ast.UnaryExpression{
-			Token:    p.curToken,
-			Operator: "~",
-			Right:    p.parseExpression(),
-		}
-	case lexer.IF:
-		left = p.parseIfExpression()
-	case lexer.WHILE:
-		left = p.parseWhileExpression()
-	case lexer.NEW:
-		left = p.parseNewExpression()
-	case lexer.ISVOID:
-		left = p.parseIsVoidExpression()
-	case lexer.LBRACE:
-		left = p.parseBlockExpression()
-	case lexer.LET:
-		left = p.parseLetExpression()
-	case lexer.LPAREN:
-		p.nextToken()
-		left = p.parseExpression()
-		if !p.expectCurrent(lexer.RPAREN) {
-			return nil
-		}
+	left := p.parsePrefixExpression()
+	if left == nil {
+		return nil
 	}
 
-	// Parse binary expressions if we have an operator next
-	precedence := p.curPrecedence()
-	for !p.curTokenIs(lexer.SEMI) && !p.curTokenIs(lexer.EOF) && precedence < p.peekPrecedence() {
-		left = p.parseBinaryExpression(precedence)
+	for !p.peekTokenIs(lexer.SEMI) && !p.peekTokenIs(lexer.EOF) {
+		if p.peekTokenIs(lexer.RPAREN) || p.peekTokenIs(lexer.RBRACE) {
+			break
+		}
+
+		precedence := p.curPrecedence()
+		if precedence >= p.peekPrecedence() {
+			break
+		}
+
+		if !p.expectAndPeek(p.peekToken.Type) {
+			return nil
+		}
+
+		switch p.curToken.Type {
+		case lexer.NOT:
+			left = p.parseNotExpression()
+		case lexer.PLUS, lexer.MINUS, lexer.TIMES, lexer.DIVIDE, lexer.LT, lexer.LE, lexer.EQ:
+			left = &ast.BinaryExpression{
+				Token:    p.curToken,
+				Left:     left,
+				Operator: p.curToken.Type,
+				Right:    p.parsePrefixExpression(),
+			}
+		case lexer.ASSIGN:
+			if id, ok := left.(*ast.ObjectIdentifier); ok {
+				left = &ast.Assignment{
+					Token: p.curToken,
+					Left:  id,
+					Value: p.parseExpression(),
+				}
+			} else {
+				p.errors = append(p.errors, "left side of assignment must be an identifier")
+				return nil
+			}
+		}
 	}
 
 	return left
 }
 
 func (p *Parser) parseIfExpression() *ast.Conditional {
-	exp := &ast.Conditional{Token: p.curToken}
-	if !p.expectAndPeek(lexer.IF) {
+	conditional := &ast.Conditional{Token: p.curToken}
+
+	p.nextToken() // move past 'if'
+
+	conditional.Predicate = p.parseExpression()
+
+	if !p.curTokenIs(lexer.THEN) {
+		p.currentError(lexer.THEN)
 		return nil
 	}
+	p.nextToken() // move past 'then'
 
-	exp.Condition = p.parseExpression()
+	conditional.ThenBranch = p.parseExpression()
 
-	if !p.expectAndPeek(lexer.THEN) {
+	if !p.curTokenIs(lexer.ELSE) {
+		p.currentError(lexer.ELSE)
 		return nil
 	}
+	p.nextToken() // move past 'else'
 
-	exp.ThenBranch = p.parseExpression()
+	conditional.ElseBranch = p.parseExpression()
 
-	if !p.expectAndPeek(lexer.ELSE) {
+	if !p.curTokenIs(lexer.FI) {
+		p.currentError(lexer.FI)
 		return nil
 	}
+	p.nextToken() // move past 'fi'
 
-	exp.ElseBranch = p.parseExpression()
-
-	if !p.expectAndPeek(lexer.FI) {
-		return nil
-	}
-
-	return exp
+	return conditional
 }
 
+// Update parseWhileExpression to handle WHILE, LOOP, and POOL correctly
 func (p *Parser) parseWhileExpression() *ast.Loop {
 	exp := &ast.Loop{Token: p.curToken}
-	if !p.expectAndPeek(lexer.WHILE) {
-		return nil
-	}
+	p.nextToken() // Consume WHILE
 
 	exp.Condition = p.parseExpression()
 
-	if !p.expectAndPeek(lexer.LOOP) {
+	if !p.curTokenIs(lexer.LOOP) {
+		p.currentError(lexer.LOOP)
 		return nil
 	}
+	p.nextToken() // Consume LOOP
 
 	exp.Body = p.parseExpression()
 
-	if !p.expectAndPeek(lexer.POOL) {
+	if !p.curTokenIs(lexer.POOL) {
+		p.currentError(lexer.POOL)
 		return nil
 	}
+	p.nextToken() // Consume POOL
 
 	return exp
 }
 
 func (p *Parser) parseLetExpression() *ast.Let {
-	exp := &ast.Let{Token: p.curToken}
-	if !p.expectAndPeek(lexer.LET) {
+	letExp := &ast.Let{Token: p.curToken}
+
+	p.nextToken() // move past 'let'
+
+	// Parse variable name
+	if !p.curTokenIs(lexer.OBJECTID) {
+		p.currentError(lexer.OBJECTID)
 		return nil
 	}
+	letExp.VarName = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
 
-	for {
-		decl := &ast.LetDeclaration{Token: p.curToken}
-		decl.Name = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-		if !p.expectAndPeek(lexer.OBJECTID) {
-			return nil
-		}
+	// Parse type annotation
+	if !p.curTokenIs(lexer.COLON) {
+		p.currentError(lexer.COLON)
+		return nil
+	}
+	p.nextToken()
 
-		if !p.expectAndPeek(lexer.COLON) {
-			return nil
-		}
+	if !p.curTokenIs(lexer.TYPEID) {
+		p.currentError(lexer.TYPEID)
+		return nil
+	}
+	letExp.VarType = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
 
-		decl.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-		if !p.expectAndPeek(lexer.TYPEID) {
-			return nil
-		}
-
-		if p.peekTokenIs(lexer.ASSIGN) {
-			p.nextToken()
-			decl.Init = p.parseExpression()
-		}
-
-		exp.Declarations = append(exp.Declarations, decl)
-
-		if !p.peekTokenIs(lexer.COMMA) {
-			break
-		}
+	// Parse optional initialization
+	if p.curTokenIs(lexer.ASSIGN) {
 		p.nextToken()
+		letExp.VarInit = p.parseExpression()
 	}
 
-	if !p.expectAndPeek(lexer.IN) {
+	if !p.curTokenIs(lexer.IN) {
+		p.currentError(lexer.IN)
 		return nil
 	}
+	p.nextToken()
 
-	exp.Body = p.parseExpression()
+	letExp.Body = p.parseExpression()
 
-	return exp
+	return letExp
 }
 
+// Update parseNewExpression to correctly handle NEW and TYPEID
 func (p *Parser) parseNewExpression() *ast.New {
 	exp := &ast.New{Token: p.curToken}
-	if !p.expectAndPeek(lexer.NEW) {
+	p.nextToken() // Consume NEW
+
+	if !p.curTokenIs(lexer.TYPEID) {
+		p.currentError(lexer.TYPEID)
 		return nil
 	}
-
 	exp.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	if !p.expectAndPeek(lexer.TYPEID) {
-		return nil
-	}
-
+	p.nextToken() // Consume TYPEID
 	return exp
 }
 
+// Update parseIsVoidExpression to consume the ISVOID token
 func (p *Parser) parseIsVoidExpression() *ast.IsVoid {
 	exp := &ast.IsVoid{Token: p.curToken}
-	if !p.expectAndPeek(lexer.ISVOID) {
-		return nil
-	}
-
+	p.nextToken() // Consume ISVOID
 	exp.Expr = p.parseExpression()
-
 	return exp
 }
 
-func (p *Parser) parseNotExpression() *ast.UnaryExpression {
-	exp := &ast.UnaryExpression{Token: p.curToken, Operator: lexer.NOT}
-	if !p.expectAndPeek(lexer.NOT) {
+// Update parseNotExpression to use the token's literal
+func (p *Parser) parseNotExpression() ast.Expression {
+	token := p.curToken
+	if !p.expectAndPeek(p.peekToken.Type) {
 		return nil
 	}
 
-	exp.Right = p.parseExpression()
-
-	return exp
+	return &ast.UnaryExpression{
+		Token:    token,
+		Operator: lexer.NOT,
+		Right:    p.parseExpression(),
+	}
 }
 
 func (p *Parser) parseBlockExpression() *ast.Block {
-	exp := &ast.Block{Token: p.curToken}
-	if !p.expectAndPeek(lexer.LBRACE) {
-		return nil
-	}
+	block := &ast.Block{Token: p.curToken}
+	block.Expressions = []ast.Expression{}
 
-	for !p.peekTokenIs(lexer.RBRACE) {
-		p.nextToken()
-		exp.Expressions = append(exp.Expressions, p.parseExpression())
-		if !p.expectAndPeek(lexer.SEMI) {
+	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		expr := p.parseExpression()
+		if expr != nil {
+			block.Expressions = append(block.Expressions, expr)
+		}
+
+		if !p.curTokenIs(lexer.SEMI) {
+			p.currentError(lexer.SEMI)
 			return nil
 		}
+		p.nextToken()
 	}
 
-	if !p.expectAndPeek(lexer.RBRACE) {
+	if !p.curTokenIs(lexer.RBRACE) {
+		p.currentError(lexer.RBRACE)
 		return nil
 	}
+	p.nextToken()
 
-	return exp
+	return block
 }
 
 func (p *Parser) parseBinaryExpression(precedence int) ast.Expression {
-	leftExp := p.parseUnaryExpression()
+	left := p.parsePrefixExpression()
+	if left == nil {
+		return nil
+	}
 
 	for !p.peekTokenIs(lexer.SEMI) && precedence < p.peekPrecedence() {
-		p.nextToken()
-		operator := p.curToken.Type
-		rightExp := p.parseBinaryExpression(p.curPrecedence())
-		leftExp = &ast.BinaryExpression{
-			Token:    p.curToken,
-			Left:     leftExp,
+		operatorToken := p.peekToken
+		if !p.expectAndPeek(operatorToken.Type) {
+			return nil
+		}
+
+		operator := operatorToken.Type
+		curPrecedence := p.curPrecedence()
+
+		right := p.parseBinaryExpression(curPrecedence)
+		if right == nil {
+			return nil
+		}
+
+		left = &ast.BinaryExpression{
+			Token:    operatorToken,
+			Left:     left,
 			Operator: operator,
-			Right:    rightExp,
+			Right:    right,
 		}
 	}
 
-	return leftExp
+	return left
+}
+
+func (p *Parser) parsePrefixExpression() ast.Expression {
+	switch p.curToken.Type {
+	case lexer.IF:
+		return p.parseIfExpression()
+	case lexer.WHILE:
+		return p.parseWhileExpression()
+	case lexer.LET:
+		return p.parseLetExpression()
+	case lexer.LBRACE:
+		return p.parseBlockExpression()
+	case lexer.NEW:
+		return p.parseNewExpression()
+	case lexer.ISVOID:
+		return p.parseIsVoidExpression()
+	case lexer.NOT, lexer.NEG:
+		return p.parseUnaryExpression()
+	default:
+		return p.parsePrimaryExpression()
+	}
 }
 
 func (p *Parser) parseUnaryExpression() ast.Expression {
-	switch p.curToken.Type {
-	case lexer.NOT, lexer.NEG:
-		operator := p.curToken.Type
-		p.nextToken()
-		return &ast.UnaryExpression{
-			Token:    p.curToken,
-			Operator: operator,
-			Right:    p.parseUnaryExpression(),
-		}
-	default:
-		return p.parsePrimaryExpression()
+	operator := p.curToken.Type // store token type
+	tok := p.curToken
+	p.nextToken()
+
+	return &ast.UnaryExpression{
+		Token:    tok,
+		Operator: operator, // operator is lexer.TokenType
+		Right:    p.parseBinaryExpression(PREFIX),
 	}
 }
 
@@ -549,15 +589,36 @@ func (p *Parser) parsePrimaryExpression() ast.Expression {
 	case lexer.BOOL_CONST:
 		return &ast.BooleanLiteral{Token: p.curToken, Value: p.curToken.Literal == "true"}
 	case lexer.OBJECTID:
-		return &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+		if p.peekTokenIs(lexer.ASSIGN) {
+			name := &ast.ObjectIdentifier{
+				Token: p.curToken,
+				Value: p.curToken.Literal,
+			}
+			assignToken := p.peekToken
+			p.nextToken() // consume OBJECTID
+			p.nextToken() // consume ASSIGN
+			right := p.parseExpression()
+			return &ast.Assignment{
+				Token: assignToken,
+				Left:  name,
+				Value: right,
+			}
+		}
+		return &ast.ObjectIdentifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		}
 	case lexer.LPAREN:
 		p.nextToken()
-		exp := p.parseExpression()
-		if !p.expectAndPeek(lexer.RPAREN) {
+		expr := p.parseExpression()
+		if !p.curTokenIs(lexer.RPAREN) {
+			p.currentError(lexer.RPAREN)
 			return nil
 		}
-		return exp
+		p.nextToken() // consume ')'
+		return expr
 	default:
+		p.errors = append(p.errors, fmt.Sprintf("unexpected token in primary expression: %s", p.curToken.Type))
 		return nil
 	}
 }
@@ -576,6 +637,7 @@ func (p *Parser) curPrecedence() int {
 	return LOWEST
 }
 
+// Update precedences to ensure proper operator precedence
 var precedences = map[lexer.TokenType]int{
 	lexer.EQ:     EQUALS,
 	lexer.LT:     LESSGREATER,
@@ -585,13 +647,9 @@ var precedences = map[lexer.TokenType]int{
 	lexer.TIMES:  PRODUCT,
 	lexer.DIVIDE: PRODUCT,
 	lexer.ASSIGN: ASSIGN,
-	lexer.DARROW: ASSIGN,
 	lexer.NOT:    PREFIX,
 	lexer.NEG:    PREFIX,
 	lexer.LPAREN: CALL,
-	lexer.LBRACE: CALL,
-	lexer.DOT:    CALL,
-	lexer.AT:     CALL,
 }
 
 const (

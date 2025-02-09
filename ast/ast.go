@@ -23,14 +23,12 @@ type Feature interface {
 	featureNode()
 }
 
-// ========== Identifiers ==========
 type TypeIdentifier struct {
 	Token lexer.Token
 	Value string
 }
 
 func (ti *TypeIdentifier) TokenLiteral() string { return ti.Token.Literal }
-func (ti *TypeIdentifier) expressionNode()      {}
 
 type ObjectIdentifier struct {
 	Token lexer.Token
@@ -40,200 +38,228 @@ type ObjectIdentifier struct {
 func (oi *ObjectIdentifier) TokenLiteral() string { return oi.Token.Literal }
 func (oi *ObjectIdentifier) expressionNode()      {}
 
-// ========== Program Structure ==========
 type Program struct {
 	Classes []*Class
 }
 
-func (p *Program) TokenLiteral() string {
-	if len(p.Classes) > 0 {
-		return p.Classes[0].TokenLiteral()
-	}
-	return ""
-}
+func (p *Program) TokenLiteral() string { return "" }
 
 type Class struct {
 	Token    lexer.Token
 	Name     *TypeIdentifier
-	Parent   *TypeIdentifier // Optional inherits
+	Parent   *TypeIdentifier
 	Features []Feature
 }
 
 func (c *Class) TokenLiteral() string { return c.Token.Literal }
-func (c *Class) statementNode()       {}
-
-// ========== Features (Attributes/Methods) ==========
-type Attribute struct {
-	Token lexer.Token
-	Name  *ObjectIdentifier
-	Type  *TypeIdentifier
-	Init  Expression // Optional initialization
-}
-
-func (a *Attribute) TokenLiteral() string { return a.Token.Literal }
-func (a *Attribute) featureNode()         {}
-
-type Method struct {
-	Token      lexer.Token
-	Name       *ObjectIdentifier
-	Formals    []*Formal
-	ReturnType *TypeIdentifier
-	Body       Expression
-}
-
-func (m *Method) TokenLiteral() string { return m.Token.Literal }
-func (m *Method) featureNode()         {}
 
 type Formal struct {
-	Token lexer.Token
-	Name  *ObjectIdentifier
-	Type  *TypeIdentifier
+	Name *ObjectIdentifier
+	Type *TypeIdentifier
 }
 
-// ========== Expressions ==========
+func (f *Formal) TokenLiteral() string { return f.Name.Value }
+
+// IntegerLiteral represents an integer literal in the AST.
 type IntegerLiteral struct {
-	Token lexer.Token
-	Value int64
+	Token lexer.Token // The token representing the integer literal.
+	Value int64       // The actual value of the integer literal.
 }
 
-func (il *IntegerLiteral) TokenLiteral() string { return il.Token.Literal }
 func (il *IntegerLiteral) expressionNode()      {}
+func (il *IntegerLiteral) TokenLiteral() string { return il.Token.Literal }
 
+// StringLiteral represents a string literal in the AST.
 type StringLiteral struct {
-	Token lexer.Token
-	Value string
+	Token lexer.Token // The token representing the string literal.
+	Value string      // The actual value of the string literal.
 }
 
-func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) expressionNode()      {}
+func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 
+// BooleanLiteral represents a boolean literal in the AST.
 type BooleanLiteral struct {
-	Token lexer.Token
-	Value bool
+	Token lexer.Token // The token representing the boolean literal.
+	Value bool        // The actual value of the boolean literal.
 }
 
-func (bl *BooleanLiteral) TokenLiteral() string { return bl.Token.Literal }
 func (bl *BooleanLiteral) expressionNode()      {}
+func (bl *BooleanLiteral) TokenLiteral() string { return bl.Token.Literal }
 
-type Assignment struct {
-	Token lexer.Token
-	Left  *ObjectIdentifier
-	Value Expression
+// UnaryExpression represents a unary operation in the AST.
+type UnaryExpression struct {
+	Token    lexer.Token // The operator token, e.g., 'not', '~', 'isvoid'.
+	Operator string      // The operator as a string.
+	Right    Expression  // The right-hand side expression.
 }
 
-func (a *Assignment) TokenLiteral() string { return a.Token.Literal }
-func (a *Assignment) expressionNode()      {}
+func (ue *UnaryExpression) expressionNode()      {}
+func (ue *UnaryExpression) TokenLiteral() string { return ue.Token.Literal }
 
-type Dispatch struct {
-	Token      lexer.Token
-	Receiver   Expression      // Can be nil (implicit self)
-	StaticType *TypeIdentifier // Optional for static dispatch (@)
-	Method     *ObjectIdentifier
-	Args       []Expression
+// BinaryExpression represents a binary operation in the AST.
+type BinaryExpression struct {
+	Token    lexer.Token // The operator token, e.g., '+', '-', '*', '/'.
+	Operator string      // The operator as a string.
+	Left     Expression  // The left-hand side expression.
+	Right    Expression  // The right-hand side expression.
 }
 
-func (d *Dispatch) TokenLiteral() string { return d.Token.Literal }
-func (d *Dispatch) expressionNode()      {}
+func (be *BinaryExpression) expressionNode()      {}
+func (be *BinaryExpression) TokenLiteral() string { return be.Token.Literal }
 
-type Conditional struct {
-	Token      lexer.Token
-	Predicate  Expression
-	ThenBranch Expression
-	ElseBranch Expression
+// IfExpression represents an if-else expression in the AST.
+type IfExpression struct {
+	Token       lexer.Token // The 'if' token.
+	Condition   Expression  // The condition expression.
+	Consequence Expression  // The consequence expression (then branch).
+	Alternative Expression  // The alternative expression (else branch).
 }
 
-func (c *Conditional) TokenLiteral() string { return c.Token.Literal }
-func (c *Conditional) expressionNode()      {}
+func (ie *IfExpression) expressionNode()      {}
+func (ie *IfExpression) TokenLiteral() string { return ie.Token.Literal }
 
-type Loop struct {
-	Token     lexer.Token
-	Condition Expression
-	Body      Expression
+// WhileExpression represents a while loop in the AST.
+type WhileExpression struct {
+	Token     lexer.Token // The 'while' token.
+	Condition Expression  // The condition expression.
+	Body      Expression  // The body expression.
 }
 
-func (l *Loop) TokenLiteral() string { return l.Token.Literal }
-func (l *Loop) expressionNode()      {}
+func (we *WhileExpression) expressionNode()      {}
+func (we *WhileExpression) TokenLiteral() string { return we.Token.Literal }
 
-type Block struct {
-	Token       lexer.Token
-	Expressions []Expression
+// BlockExpression represents a block of expressions in the AST.
+type BlockExpression struct {
+	Token       lexer.Token  // The '{' token.
+	Expressions []Expression // The list of expressions within the block.
 }
 
-func (b *Block) TokenLiteral() string { return b.Token.Literal }
-func (b *Block) expressionNode()      {}
+func (be *BlockExpression) expressionNode()      {}
+func (be *BlockExpression) TokenLiteral() string { return be.Token.Literal }
 
-type LetDeclaration struct {
-	Token lexer.Token
-	Name  *ObjectIdentifier
-	Type  *TypeIdentifier
-	Init  Expression // Optional
+// LetExpression represents a let expression in the AST.
+type LetExpression struct {
+	Token    lexer.Token   // The 'let' token.
+	Bindings []*LetBinding // The list of bindings (variable declarations).
+	In       Expression    // The expression that follows the bindings.
 }
 
-type Let struct {
-	Token   lexer.Token
-	VarName *ObjectIdentifier
-	VarType *TypeIdentifier
-	VarInit Expression
-	Body    Expression
+func (le *LetExpression) expressionNode()      {}
+func (le *LetExpression) TokenLiteral() string { return le.Token.Literal }
+
+// LetBinding represents a single binding in a let expression.
+type LetBinding struct {
+	Identifier *ObjectIdentifier // The identifier of the binding.
+	Type       *TypeIdentifier   // The type of the binding.
+	Init       Expression        // The initialization expression, if any.
 }
 
-func (l *Let) TokenLiteral() string { return l.Token.Literal }
-func (l *Let) expressionNode()      {}
-
-type CaseBranch struct {
-	Token   lexer.Token
-	VarName *ObjectIdentifier
-	VarType *TypeIdentifier
-	Expr    Expression
+// NewExpression represents the 'new' type expression in the AST.
+type NewExpression struct {
+	Token lexer.Token     // The 'new' token.
+	Type  *TypeIdentifier // The type to be instantiated.
 }
 
-type Case struct {
-	Token    lexer.Token
-	Expr     Expression
+func (ne *NewExpression) expressionNode()      {}
+func (ne *NewExpression) TokenLiteral() string { return ne.Token.Literal }
+
+// IsVoidExpression represents an 'isvoid' expression in the AST.
+type IsVoidExpression struct {
+	Token      lexer.Token // The 'isvoid' token.
+	Expression Expression  // The expression to check for being void.
+}
+
+func (ive *IsVoidExpression) expressionNode()      {}
+func (ive *IsVoidExpression) TokenLiteral() string { return ive.Token.Literal }
+
+// Add CaseExpression and CaseBranch
+type CaseExpression struct {
+	Token    lexer.Token // 'case' token
+	Expr     Expression  // Expression to evaluate
 	Branches []*CaseBranch
 }
 
-func (c *Case) TokenLiteral() string { return c.Token.Literal }
-func (c *Case) expressionNode()      {}
+func (ce *CaseExpression) expressionNode()      {}
+func (ce *CaseExpression) TokenLiteral() string { return ce.Token.Literal }
 
-type New struct {
-	Token lexer.Token
-	Type  *TypeIdentifier
+type CaseBranch struct {
+	Token      lexer.Token // Identifier token
+	Identifier *ObjectIdentifier
+	Type       *TypeIdentifier
+	Expr       Expression
 }
 
-func (n *New) TokenLiteral() string { return n.Token.Literal }
-func (n *New) expressionNode()      {}
-
-type IsVoid struct {
-	Token lexer.Token
-	Expr  Expression
+// Add Assignment expression
+type Assignment struct {
+	Token lexer.Token // The := token
+	Left  Expression  // Should be an ObjectIdentifier
+	Value Expression
 }
 
-func (iv *IsVoid) TokenLiteral() string { return iv.Token.Literal }
-func (iv *IsVoid) expressionNode()      {}
+func (a *Assignment) expressionNode()      {}
+func (a *Assignment) TokenLiteral() string { return a.Token.Literal }
 
-type BinaryExpression struct {
-	Token    lexer.Token
-	Left     Expression
-	Operator lexer.TokenType
-	Right    Expression
+// Add Dispatch expressions
+type DynamicDispatch struct {
+	Token     lexer.Token // . token
+	Object    Expression  // Left side of dispatch
+	Method    *ObjectIdentifier
+	Arguments []Expression
 }
 
-func (be *BinaryExpression) TokenLiteral() string { return be.Token.Literal }
-func (be *BinaryExpression) expressionNode()      {}
+func (dd *DynamicDispatch) expressionNode()      {}
+func (dd *DynamicDispatch) TokenLiteral() string { return dd.Token.Literal }
 
-type UnaryExpression struct {
-	Token    lexer.Token
-	Operator lexer.TokenType
-	Right    Expression
+type StaticDispatch struct {
+	Token     lexer.Token // @ token
+	Object    Expression
+	Type      *TypeIdentifier
+	Method    *ObjectIdentifier
+	Arguments []Expression
 }
 
-func (ue *UnaryExpression) TokenLiteral() string { return ue.Token.Literal }
-func (ue *UnaryExpression) expressionNode()      {}
+func (sd *StaticDispatch) expressionNode()      {}
+func (sd *StaticDispatch) TokenLiteral() string { return sd.Token.Literal }
 
-type SelfExpression struct {
-	Token lexer.Token
+// Add Self expression
+type Self struct {
+	Token lexer.Token // 'self' keyword
 }
 
-func (s *SelfExpression) TokenLiteral() string { return s.Token.Literal }
-func (s *SelfExpression) expressionNode()      {}
+func (s *Self) expressionNode()      {}
+func (s *Self) TokenLiteral() string { return s.Token.Literal }
+
+// Add Void literal
+type VoidLiteral struct {
+	Token lexer.Token // 'void' keyword
+}
+
+func (vl *VoidLiteral) expressionNode()      {}
+func (vl *VoidLiteral) TokenLiteral() string { return vl.Token.Literal }
+
+// Modified Method struct to include body
+type Method struct {
+	Name    *ObjectIdentifier
+	Type    *TypeIdentifier
+	Formals []*Formal
+	Body    Expression // Added body expression
+}
+
+func (m *Method) TokenLiteral() string { return m.Name.Value }
+func (m *Method) featureNode()         {}
+
+// Modified Attribute struct to include initialization
+type Attribute struct {
+	Name *ObjectIdentifier
+	Type *TypeIdentifier
+	Init Expression // Added initialization expression (optional)
+}
+
+func (a *Attribute) TokenLiteral() string { return a.Name.Value }
+func (a *Attribute) featureNode()         {}
+
+// Add helper for SELF_TYPE handling
+func IsSELF_TYPE(t *TypeIdentifier) bool {
+	return t.Value == "SELF_TYPE"
+}

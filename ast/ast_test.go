@@ -5,237 +5,270 @@ import (
 	"testing"
 )
 
-func TestClassNode(t *testing.T) {
-	classToken := lexer.Token{Type: lexer.CLASS, Literal: "class"}
-	mainType := &TypeIdentifier{
-		Token: lexer.Token{Type: lexer.TYPEID, Literal: "Main"},
-		Value: "Main",
-	}
-	class := &Class{
-		Token: classToken,
-		Name:  mainType,
-	}
-
-	if class.TokenLiteral() != "class" {
-		t.Errorf("Class.TokenLiteral() = %q, want 'class'", class.TokenLiteral())
-	}
-}
-
-func TestMethodNode(t *testing.T) {
-	methodToken := lexer.Token{Type: lexer.OBJECTID, Literal: "main"}
-	returnType := &TypeIdentifier{
-		Token: lexer.Token{Type: lexer.TYPEID, Literal: "Object"},
-		Value: "Object",
-	}
-	body := &Block{
-		Token: lexer.Token{Type: lexer.LBRACE, Literal: "{"},
+func TestSimpleClass(t *testing.T) {
+	// Test the simple Main class from example.cl
+	mainClass := &Class{
+		Token: lexer.Token{Type: lexer.CLASS, Literal: "class"},
+		Name:  &TypeIdentifier{Value: "Main"},
+		Features: []Feature{
+			&Method{
+				Name: &ObjectIdentifier{Value: "main"},
+				Type: &TypeIdentifier{Value: "Int"},
+				Body: &IntegerLiteral{Value: 42},
+			},
+		},
 	}
 
-	method := &Method{
-		Token:      methodToken,
-		Name:       &ObjectIdentifier{Token: lexer.Token{Type: lexer.OBJECTID, Literal: "main"}, Value: "main"},
-		ReturnType: returnType,
-		Body:       body,
+	if mainClass.Name.Value != "Main" {
+		t.Errorf("Expected class name 'Main', got %s", mainClass.Name.Value)
+	}
+
+	if len(mainClass.Features) != 1 {
+		t.Errorf("Expected 1 feature, got %d", len(mainClass.Features))
+	}
+
+	method, ok := mainClass.Features[0].(*Method)
+	if !ok {
+		t.Fatalf("Expected first feature to be a method")
 	}
 
 	if method.Name.Value != "main" {
-		t.Errorf("Method.Name = %q, want 'main'", method.Name.Value)
+		t.Errorf("Expected method name 'main', got %s", method.Name.Value)
+	}
+
+	if method.Type.Value != "Int" {
+		t.Errorf("Expected return type 'Int', got %s", method.Type.Value)
 	}
 }
 
-func TestDispatchExpression(t *testing.T) {
-	receiver := &SelfExpression{Token: lexer.Token{Type: lexer.SELF}}
-	method := &ObjectIdentifier{Token: lexer.Token{Type: lexer.OBJECTID, Literal: "toString"}, Value: "toString"}
-
-	dispatch := &Dispatch{
-		Receiver: receiver,
-		Method:   method,
-	}
-
-	if dispatch.Method.Value != "toString" {
-		t.Errorf("Dispatch.Method = %q, want 'toString'", dispatch.Method.Value)
-	}
-}
-
-func TestBinaryExpression(t *testing.T) {
-	left := &IntegerLiteral{Value: 5}
-	right := &IntegerLiteral{Value: 3}
-	opToken := lexer.Token{Type: lexer.PLUS, Literal: "+"}
-
-	binExpr := &BinaryExpression{
-		Left:     left,
-		Operator: lexer.PLUS,
-		Right:    right,
-		Token:    opToken,
-	}
-
-	if binExpr.Operator != lexer.PLUS {
-		t.Errorf("BinaryExpression.Operator = %v, want PLUS", binExpr.Operator)
-	}
-}
-
-func TestLetExpression(t *testing.T) {
-	letExpr := &Let{
-		VarName: &ObjectIdentifier{
-			Token: lexer.Token{Type: lexer.OBJECTID, Literal: "x"},
-			Value: "x",
-		},
-		VarType: &TypeIdentifier{
-			Token: lexer.Token{Type: lexer.TYPEID, Literal: "Int"},
-			Value: "Int",
-		},
-		VarInit: &IntegerLiteral{Value: 42},
-		Body: &ObjectIdentifier{
-			Token: lexer.Token{Type: lexer.OBJECTID, Literal: "x"},
-			Value: "x",
-		},
-	}
-
-	if letExpr.VarName.Value != "x" {
-		t.Errorf("let.VarName.Value not 'x'. got=%s", letExpr.VarName.Value)
-	}
-
-	if letExpr.VarType.Value != "Int" {
-		t.Errorf("let.VarType.Value not 'Int'. got=%s", letExpr.VarType.Value)
-	}
-}
-
-func TestProgramNode(t *testing.T) {
-	classToken := lexer.Token{Type: lexer.CLASS, Literal: "class"}
-	mainType := &TypeIdentifier{
-		Token: lexer.Token{Type: lexer.TYPEID, Literal: "Main"},
-		Value: "Main",
-	}
-	class := &Class{
-		Token: classToken,
-		Name:  mainType,
-	}
-
-	program := &Program{
-		Classes: []*Class{class},
-	}
-
-	if program.TokenLiteral() != "class" {
-		t.Errorf("Program.TokenLiteral() = %q, want 'class'", program.TokenLiteral())
-	}
-}
-
-func TestAttributeNode(t *testing.T) {
-	attrToken := lexer.Token{Type: lexer.OBJECTID, Literal: "x"}
-	attrType := &TypeIdentifier{
-		Token: lexer.Token{Type: lexer.TYPEID, Literal: "Int"},
-		Value: "Int",
-	}
-	attr := &Attribute{
-		Token: attrToken,
-		Name:  &ObjectIdentifier{Token: lexer.Token{Type: lexer.OBJECTID, Literal: "x"}, Value: "x"},
-		Type:  attrType,
-	}
-
-	if attr.Name.Value != "x" {
-		t.Errorf("Attribute.Name = %q, want 'x'", attr.Name.Value)
-	}
-}
-
-func TestConditionalNode(t *testing.T) {
-	conditional := &Conditional{
-		Token: lexer.Token{Type: lexer.IF, Literal: "if"},
-		Predicate: &BooleanLiteral{
-			Token: lexer.Token{Type: lexer.BOOL_CONST, Literal: "true"},
-			Value: true,
-		},
-		ThenBranch: &IntegerLiteral{
-			Token: lexer.Token{Type: lexer.INT_CONST, Literal: "1"},
-			Value: 1,
-		},
-		ElseBranch: &IntegerLiteral{
-			Token: lexer.Token{Type: lexer.INT_CONST, Literal: "0"},
-			Value: 0,
+func TestListImplementation(t *testing.T) {
+	// Test the List class from example_complex.cl
+	listClass := &Class{
+		Token: lexer.Token{Type: lexer.CLASS, Literal: "class"},
+		Name:  &TypeIdentifier{Value: "List"},
+		Features: []Feature{
+			&Method{
+				Name: &ObjectIdentifier{Value: "isNil"},
+				Type: &TypeIdentifier{Value: "Bool"},
+				Body: &BooleanLiteral{Value: true},
+			},
+			&Method{
+				Name: &ObjectIdentifier{Value: "head"},
+				Type: &TypeIdentifier{Value: "Int"},
+				Body: &BlockExpression{
+					Expressions: []Expression{
+						&DynamicDispatch{
+							Object: &Self{},
+							Method: &ObjectIdentifier{Value: "abort"},
+						},
+						&IntegerLiteral{Value: 0},
+					},
+				},
+			},
+			&Method{
+				Name: &ObjectIdentifier{Value: "cons"},
+				Type: &TypeIdentifier{Value: "List"},
+				Formals: []*Formal{
+					{
+						Name: &ObjectIdentifier{Value: "i"},
+						Type: &TypeIdentifier{Value: "Int"},
+					},
+				},
+				Body: &DynamicDispatch{
+					Object: &NewExpression{
+						Type: &TypeIdentifier{Value: "Cons"},
+					},
+					Method: &ObjectIdentifier{Value: "init"},
+					Arguments: []Expression{
+						&ObjectIdentifier{Value: "i"},
+						&Self{},
+					},
+				},
+			},
 		},
 	}
 
-	if conditional.Predicate == nil {
-		t.Error("conditional.Predicate is nil")
+	if listClass.Name.Value != "List" {
+		t.Errorf("Expected class name 'List', got %s", listClass.Name.Value)
 	}
 
-	if conditional.TokenLiteral() != "if" {
-		t.Errorf("conditional.TokenLiteral not 'if'. got=%q", conditional.TokenLiteral())
+	if len(listClass.Features) != 3 {
+		t.Errorf("Expected 3 features, got %d", len(listClass.Features))
+	}
+
+	// Test the cons method
+	consMethod, ok := listClass.Features[2].(*Method)
+	if !ok {
+		t.Fatalf("Expected third feature to be a method")
+	}
+
+	if len(consMethod.Formals) != 1 {
+		t.Errorf("Expected 1 formal parameter, got %d", len(consMethod.Formals))
+	}
+
+	// Test the Cons class
+	consClass := &Class{
+		Token:  lexer.Token{Type: lexer.CLASS, Literal: "class"},
+		Name:   &TypeIdentifier{Value: "Cons"},
+		Parent: &TypeIdentifier{Value: "List"},
+		Features: []Feature{
+			&Attribute{
+				Name: &ObjectIdentifier{Value: "car"},
+				Type: &TypeIdentifier{Value: "Int"},
+			},
+			&Attribute{
+				Name: &ObjectIdentifier{Value: "cdr"},
+				Type: &TypeIdentifier{Value: "List"},
+			},
+			&Method{
+				Name: &ObjectIdentifier{Value: "init"},
+				Type: &TypeIdentifier{Value: "List"},
+				Formals: []*Formal{
+					{
+						Name: &ObjectIdentifier{Value: "i"},
+						Type: &TypeIdentifier{Value: "Int"},
+					},
+					{
+						Name: &ObjectIdentifier{Value: "rest"},
+						Type: &TypeIdentifier{Value: "List"},
+					},
+				},
+				Body: &BlockExpression{
+					Expressions: []Expression{
+						&Assignment{
+							Left:  &ObjectIdentifier{Value: "car"},
+							Value: &ObjectIdentifier{Value: "i"},
+						},
+						&Assignment{
+							Left:  &ObjectIdentifier{Value: "cdr"},
+							Value: &ObjectIdentifier{Value: "rest"},
+						},
+						&Self{},
+					},
+				},
+			},
+		},
+	}
+
+	if consClass.Parent.Value != "List" {
+		t.Errorf("Expected parent class 'List', got %s", consClass.Parent.Value)
+	}
+
+	if len(consClass.Features) != 3 {
+		t.Errorf("Expected 3 features, got %d", len(consClass.Features))
 	}
 }
 
-func TestLoopNode(t *testing.T) {
-	loopToken := lexer.Token{Type: lexer.WHILE, Literal: "while"}
-	condition := &BooleanLiteral{Value: true}
-	body := &IntegerLiteral{Value: 1}
-
-	loop := &Loop{
-		Token:     loopToken,
-		Condition: condition,
-		Body:      body,
+func TestIOExample(t *testing.T) {
+	// Test the IO example from example_io.cl
+	mainClass := &Class{
+		Token:  lexer.Token{Type: lexer.CLASS, Literal: "class"},
+		Name:   &TypeIdentifier{Value: "Main"},
+		Parent: &TypeIdentifier{Value: "IO"},
+		Features: []Feature{
+			&Method{
+				Name: &ObjectIdentifier{Value: "main"},
+				Type: &TypeIdentifier{Value: "Object"},
+				Body: &BlockExpression{
+					Expressions: []Expression{
+						&DynamicDispatch{
+							Object: &Self{},
+							Method: &ObjectIdentifier{Value: "out_string"},
+							Arguments: []Expression{
+								&StringLiteral{Value: "Hello. Please enter a number: "},
+							},
+						},
+						&LetExpression{
+							Bindings: []*LetBinding{
+								{
+									Identifier: &ObjectIdentifier{Value: "num"},
+									Type:       &TypeIdentifier{Value: "Int"},
+									Init: &DynamicDispatch{
+										Object: &Self{},
+										Method: &ObjectIdentifier{Value: "in_int"},
+									},
+								},
+							},
+							In: &BlockExpression{
+								Expressions: []Expression{
+									&DynamicDispatch{
+										Object: &DynamicDispatch{
+											Object: &DynamicDispatch{
+												Object: &Self{},
+												Method: &ObjectIdentifier{Value: "out_string"},
+												Arguments: []Expression{
+													&StringLiteral{Value: "You entered: "},
+												},
+											},
+											Method: &ObjectIdentifier{Value: "out_int"},
+											Arguments: []Expression{
+												&ObjectIdentifier{Value: "num"},
+											},
+										},
+										Method: &ObjectIdentifier{Value: "out_string"},
+										Arguments: []Expression{
+											&StringLiteral{Value: "\n"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
-	if loop.Condition != condition {
-		t.Errorf("Loop.Condition = %v, want %v", loop.Condition, condition)
+	if mainClass.Parent.Value != "IO" {
+		t.Errorf("Expected parent class 'IO', got %s", mainClass.Parent.Value)
 	}
-}
 
-func TestBlockNode(t *testing.T) {
-	blockToken := lexer.Token{Type: lexer.LBRACE, Literal: "{"}
-	expr1 := &IntegerLiteral{Value: 1}
-	expr2 := &IntegerLiteral{Value: 2}
+	mainMethod, ok := mainClass.Features[0].(*Method)
+	if !ok {
+		t.Fatalf("Expected first feature to be a method")
+	}
 
-	block := &Block{
-		Token:       blockToken,
-		Expressions: []Expression{expr1, expr2},
+	block, ok := mainMethod.Body.(*BlockExpression)
+	if !ok {
+		t.Fatalf("Expected method body to be a block expression")
 	}
 
 	if len(block.Expressions) != 2 {
-		t.Errorf("Block.Expressions length = %d, want 2", len(block.Expressions))
+		t.Errorf("Expected 2 expressions in main method, got %d", len(block.Expressions))
 	}
 }
 
-func TestNewNode(t *testing.T) {
-	newToken := lexer.Token{Type: lexer.NEW, Literal: "new"}
-	newType := &TypeIdentifier{
-		Token: lexer.Token{Type: lexer.TYPEID, Literal: "Object"},
-		Value: "Object",
+func TestTypeIdentifiers(t *testing.T) {
+	tests := []struct {
+		input    *TypeIdentifier
+		expected string
+	}{
+		{&TypeIdentifier{Value: "Int"}, "Int"},
+		{&TypeIdentifier{Value: "String"}, "String"},
+		{&TypeIdentifier{Value: "Bool"}, "Bool"},
+		{&TypeIdentifier{Value: "SELF_TYPE"}, "SELF_TYPE"},
 	}
 
-	newExpr := &New{
-		Token: newToken,
-		Type:  newType,
-	}
-
-	if newExpr.Type.Value != "Object" {
-		t.Errorf("New.Type = %q, want 'Object'", newExpr.Type.Value)
-	}
-}
-
-func TestIsVoidNode(t *testing.T) {
-	isVoidToken := lexer.Token{Type: lexer.ISVOID, Literal: "isvoid"}
-	expr := &IntegerLiteral{Value: 42}
-
-	isVoid := &IsVoid{
-		Token: isVoidToken,
-		Expr:  expr,
-	}
-
-	if isVoid.Expr != expr {
-		t.Errorf("IsVoid.Expr = %v, want %v", isVoid.Expr, expr)
+	for _, tt := range tests {
+		if tt.input.Value != tt.expected {
+			t.Errorf("Expected type %s, got %s", tt.expected, tt.input.Value)
+		}
 	}
 }
 
-func TestUnaryExpressionNode(t *testing.T) {
-	unaryExpr := &UnaryExpression{
-		Token:    lexer.Token{Type: lexer.NEG, Literal: "~"},
-		Operator: lexer.NEG,
-		Right: &IntegerLiteral{
-			Token: lexer.Token{Type: lexer.INT_CONST, Literal: "5"},
-			Value: 5,
-		},
+func TestObjectIdentifiers(t *testing.T) {
+	tests := []struct {
+		input    *ObjectIdentifier
+		expected string
+	}{
+		{&ObjectIdentifier{Value: "x"}, "x"},
+		{&ObjectIdentifier{Value: "self"}, "self"},
+		{&ObjectIdentifier{Value: "main"}, "main"},
 	}
 
-	if unaryExpr.TokenLiteral() != "~" {
-		t.Errorf("unaryExpr.TokenLiteral not '~'. got=%q", unaryExpr.TokenLiteral())
+	for _, tt := range tests {
+		if tt.input.Value != tt.expected {
+			t.Errorf("Expected identifier %s, got %s", tt.expected, tt.input.Value)
+		}
 	}
 }

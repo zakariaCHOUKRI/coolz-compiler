@@ -229,6 +229,10 @@ func TestExpressionParsing(t *testing.T) {
 		checkParserErrors(t, p, i)
 
 		expression := p.parseExpression()
+		if expression == nil {
+			t.Errorf("test [%d] expected expression to be parsed, got nil", i)
+			continue
+		}
 		actual := SerializeExpression(expression)
 		if actual != tt.expected {
 			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
