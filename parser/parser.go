@@ -92,14 +92,14 @@ func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 	return p.peekToken.Type == t
 }
 
-func (p *Parser) expectAndPeek(t lexer.TokenType) bool {
-	if p.peekTokenIs(t) {
-		p.nextToken()
-		return true
-	}
-	p.peekError(t)
-	return false
-}
+// func (p *Parser) expectAndPeek(t lexer.TokenType) bool {
+// 	if p.peekTokenIs(t) {
+// 		p.nextToken()
+// 		return true
+// 	}
+// 	p.peekError(t)
+// 	return false
+// }
 
 func (p *Parser) expectCurrent(t lexer.TokenType) bool {
 	if p.curTokenIs(t) {
@@ -110,9 +110,9 @@ func (p *Parser) expectCurrent(t lexer.TokenType) bool {
 	return false
 }
 
-func (p *Parser) peekError(t lexer.TokenType) {
-	p.errors = append(p.errors, fmt.Sprintf("Expected next token to be %v, got %v line %d col %d", t, p.peekToken.Type, p.peekToken.Line, p.peekToken.Column))
-}
+// func (p *Parser) peekError(t lexer.TokenType) {
+// 	p.errors = append(p.errors, fmt.Sprintf("Expected next token to be %v, got %v line %d col %d", t, p.peekToken.Type, p.peekToken.Line, p.peekToken.Column))
+// }
 
 func (p *Parser) currentError(t lexer.TokenType) {
 	p.errors = append(p.errors, fmt.Sprintf("Expected current token to be %v, got %v line %d col %d", t, p.curToken.Type, p.peekToken.Line, p.peekToken.Column))
@@ -120,184 +120,131 @@ func (p *Parser) currentError(t lexer.TokenType) {
 
 func (p *Parser) ParseProgram() *ast.Program {
 	prog := &ast.Program{}
-	for p.curToken.Type != lexer.EOF && p.curToken.Type != lexer.ERROR {
-		c := p.parseClass()
-
-		if !p.expectAndPeek(lexer.SEMI) {
-			continue // sf error handled by method aslan
+	for p.curToken.Type == lexer.CLASS {
+		class := p.parseClass()
+		if class != nil {
+			prog.Classes = append(prog.Classes, class)
+		} else {
+			break
 		}
-		p.nextToken()
-		prog.Classes = append(prog.Classes, c)
 	}
 	return prog
 }
 
 func (p *Parser) parseClass() *ast.Class {
-
-	c := &ast.Class{Token: p.curToken}
-	if !p.expectCurrent(lexer.CLASS) {
-		return nil
-	}
-
-	if !p.curTokenIs(lexer.TYPEID) {
-		p.currentError(lexer.TYPEID)
-		return nil
-	}
-
-	c.Name = &ast.TypeIdentifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
+	token := p.curToken
 	p.nextToken()
-
-	if p.curTokenIs(lexer.INHERITS) {
-		if !p.expectAndPeek(lexer.TYPEID) {
-			return nil
-		}
-		c.Parent = &ast.TypeIdentifier{
-			Token: p.curToken,
-			Value: p.curToken.Literal,
-		}
+	name := &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
+	var parent *ast.TypeIdentifier
+	if p.curToken.Type == lexer.INHERITS {
+		p.nextToken()
+		parent = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken()
 	}
-
-	if !p.expectCurrent(lexer.LBRACE) {
-		return nil
-	}
-
-	for !p.curTokenIs(lexer.RBRACE) {
-		c.Features = append(c.Features, p.parseFeature())
-		if !p.expectAndPeek(lexer.SEMI) {
-			return nil
-		}
+	if p.curToken.Type == lexer.LBRACE {
 		p.nextToken()
 	}
-
-	if !p.curTokenIs(lexer.RBRACE) {
-		p.currentError(lexer.RBRACE)
-		return nil
+	var features []ast.Feature
+	for p.curToken.Type == lexer.OBJECTID {
+		f := p.parseFeature()
+		if f != nil {
+			features = append(features, f)
+		}
 	}
-
-	return c
+	if p.curToken.Type == lexer.RBRACE {
+		p.nextToken()
+	}
+	if p.curToken.Type == lexer.SEMI {
+		p.nextToken()
+	}
+	return &ast.Class{
+		Token:    token,
+		Name:     name,
+		Parent:   parent,
+		Features: features,
+	}
 }
 
 func (p *Parser) parseFeature() ast.Feature {
-	if p.peekTokenIs(lexer.LPAREN) {
-		return p.parseMethod()
-	}
-	return p.parseAttribute()
-}
-
-func (p *Parser) parseMethod() *ast.Method {
-	method := &ast.Method{
-		Name: &ast.ObjectIdentifier{
-			Token: p.curToken,
-			Value: p.curToken.Literal,
-		},
-	}
-
-	if !p.expectCurrent(lexer.OBJECTID) {
-		return nil
-	}
-
-	// Parse formals
-	if !p.peekTokenIs(lexer.RPAREN) {
-		p.nextToken()
-		method.Formals = p.parseFormals()
-	}
-
-	if !p.expectAndPeek(lexer.RPAREN) || !p.expectAndPeek(lexer.COLON) || !p.expectAndPeek(lexer.TYPEID) {
-		return nil
-	}
-
-	method.Type = &ast.TypeIdentifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
-
-	if !p.expectAndPeek(lexer.LBRACE) {
-		return nil
-	}
-
-	// Parse method body
+	id := &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken()
-	method.Body = p.parseExpression(LOWEST)
-
-	if !p.expectAndPeek(lexer.RBRACE) {
-		return nil
+	if p.curToken.Type == lexer.LPAREN {
+		return p.parseMethod(id)
 	}
-
-	return method
+	return p.parseAttribute(id)
 }
 
-func (p *Parser) parseFormal() *ast.Formal {
-	formal := &ast.Formal{
-		Name: &ast.ObjectIdentifier{
-			Token: p.curToken,
-			Value: p.curToken.Literal,
-		},
+func (p *Parser) parseMethod(name *ast.ObjectIdentifier) *ast.Method {
+	p.nextToken()
+	formals := p.parseFormals()
+	if p.curToken.Type == lexer.RPAREN {
+		p.nextToken()
 	}
-	if !p.expectCurrent(lexer.OBJECTID) {
-		return nil
+	if p.curToken.Type == lexer.COLON {
+		p.nextToken()
 	}
+	typ := &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
+	if p.curToken.Type == lexer.LBRACE {
+		p.nextToken()
+	}
+	body := p.parseExpression(LOWEST)
+	if p.curToken.Type == lexer.RBRACE {
+		p.nextToken()
+	}
+	if p.curToken.Type == lexer.SEMI {
+		p.nextToken()
+	}
+	return &ast.Method{
+		Name:    name,
+		Type:    typ,
+		Formals: formals,
+		Body:    body,
+	}
+}
 
-	if !p.expectCurrent(lexer.COLON) {
-		return nil
+func (p *Parser) parseAttribute(name *ast.ObjectIdentifier) *ast.Attribute {
+	var typ *ast.TypeIdentifier
+	if p.curToken.Type == lexer.COLON {
+		p.nextToken()
+		typ = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+		p.nextToken()
 	}
-
-	formal.Type = &ast.TypeIdentifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
+	var init ast.Expression
+	if p.curToken.Type == lexer.ASSIGN {
+		p.nextToken()
+		init = p.parseExpression(LOWEST)
 	}
-	if !p.curTokenIs(lexer.TYPEID) {
-		p.currentError(lexer.TYPEID)
-		return nil
+	if p.curToken.Type == lexer.SEMI {
+		p.nextToken()
 	}
-
-	return formal
+	return &ast.Attribute{
+		Name: name,
+		Type: typ,
+		Init: init,
+	}
 }
 
 func (p *Parser) parseFormals() []*ast.Formal {
-	formals := []*ast.Formal{p.parseFormal()}
-	for p.peekTokenIs(lexer.COMMA) {
+	var formals []*ast.Formal
+	for p.curToken.Type == lexer.OBJECTID {
+		n := &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken()
+		if p.curToken.Type == lexer.COLON {
+			p.nextToken()
+		}
+		t := &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken()
-		formals = append(formals, p.parseFormal())
+		formals = append(formals, &ast.Formal{Name: n, Type: t})
+		if p.curToken.Type == lexer.COMMA {
+			p.nextToken()
+			continue
+		} else {
+			break
+		}
 	}
 	return formals
-}
-
-func (p *Parser) parseAttribute() *ast.Attribute {
-	attribute := &ast.Attribute{
-		Name: &ast.ObjectIdentifier{
-			Token: p.curToken,
-			Value: p.curToken.Literal,
-		},
-	}
-
-	if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.COLON) {
-		return nil
-	}
-
-	attribute.Type = &ast.TypeIdentifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
-
-	if !p.curTokenIs(lexer.TYPEID) {
-		p.currentError(lexer.TYPEID)
-		return nil
-	}
-
-	// Parse optional initialization
-	if p.peekTokenIs(lexer.ASSIGN) {
-		p.nextToken() // consume ':'
-		p.nextToken() // consume '='
-		p.nextToken() // move to init expr
-		attribute.Init = p.parseExpression(LOWEST)
-	}
-
-	return attribute
 }
 
 func (p *Parser) registerPrefix(tokenType lexer.TokenType, fn prefixParseFn) {
@@ -311,12 +258,10 @@ func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
-		// p.noPrefixParseFnError(p.curToken.Type)
 		return nil
 	}
 	leftExp := prefix()
-
-	for !p.peekTokenIs(lexer.SEMI) && precedence < p.peekPrecedence() {
+	for precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -324,12 +269,13 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		p.nextToken()
 		leftExp = infix(leftExp)
 	}
-
 	return leftExp
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {
-	return &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	ident := &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
+	return ident
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
@@ -337,15 +283,21 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	if err != nil {
 		return nil
 	}
-	return &ast.IntegerLiteral{Token: p.curToken, Value: num}
+	lit := &ast.IntegerLiteral{Token: p.curToken, Value: num}
+	p.nextToken()
+	return lit
 }
 
 func (p *Parser) parseStringLiteral() ast.Expression {
-	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	lit := &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
+	return lit
 }
 
 func (p *Parser) parseBooleanLiteral() ast.Expression {
-	return &ast.BooleanLiteral{Token: p.curToken, Value: p.curToken.Literal == "true"}
+	lit := &ast.BooleanLiteral{Token: p.curToken, Value: p.curToken.Literal == "true"}
+	p.nextToken()
+	return lit
 }
 
 func (p *Parser) parseGroupedExpression() ast.Expression {
@@ -359,38 +311,35 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 
 func (p *Parser) parseCaseExpression() ast.Expression {
 	exp := &ast.CaseExpression{Token: p.curToken}
-
-	if !p.expectCurrent(lexer.CASE) {
-		return nil
-	}
-
+	p.nextToken() // skip 'case'
 	exp.Expr = p.parseExpression(LOWEST)
-
 	if !p.expectCurrent(lexer.OF) {
 		return nil
 	}
-
 	for !p.curTokenIs(lexer.ESAC) {
-		branch := &ast.CaseBranch{
-			Identifier: &ast.ObjectIdentifier{Token: p.curToken},
-			Type:       &ast.TypeIdentifier{Token: p.curToken},
-		}
-
-		if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.COLON) || !p.expectCurrent(lexer.TYPEID) {
+		branch := &ast.CaseBranch{}
+		idTok := p.curToken
+		if !p.expectCurrent(lexer.OBJECTID) {
 			return nil
 		}
-
-		branch.Type.Value = p.curToken.Literal
-		p.nextToken() // consume '=>'
-		branch.Expr = p.parseExpression(LOWEST)
-		exp.Branches = append(exp.Branches, branch)
-
-		if !p.curTokenIs(lexer.SEMI) {
-			break
+		branch.Identifier = &ast.ObjectIdentifier{Token: idTok, Value: idTok.Literal}
+		if !p.expectCurrent(lexer.COLON) {
+			return nil
 		}
-		p.nextToken()
+		typeTok := p.curToken
+		if !p.expectCurrent(lexer.TYPEID) {
+			return nil
+		}
+		branch.Type = &ast.TypeIdentifier{Token: typeTok, Value: typeTok.Literal}
+		if !p.expectCurrent(lexer.DARROW) {
+			return nil
+		}
+		branch.Expr = p.parseExpression(LOWEST)
+		if p.curTokenIs(lexer.SEMI) {
+			p.nextToken()
+		}
+		exp.Branches = append(exp.Branches, branch)
 	}
-
 	if !p.expectCurrent(lexer.ESAC) {
 		return nil
 	}
@@ -524,51 +473,39 @@ var precedences = map[lexer.TokenType]int{
 
 func (p *Parser) parseLetExpression() ast.Expression {
 	exp := &ast.LetExpression{Token: p.curToken}
-
 	if !p.expectCurrent(lexer.LET) {
 		return nil
 	}
-
-	// Parse bindings
 	for {
-		binding := &ast.LetBinding{
-			Identifier: &ast.ObjectIdentifier{Token: p.curToken},
-		}
-
-		if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.COLON) || !p.expectCurrent(lexer.TYPEID) {
+		binding := &ast.LetBinding{}
+		idTok := p.curToken
+		if !p.expectCurrent(lexer.OBJECTID) {
 			return nil
 		}
-
-		binding.Type = &ast.TypeIdentifier{
-			Token: p.curToken,
-			Value: p.curToken.Literal,
+		binding.Identifier = &ast.ObjectIdentifier{Token: idTok, Value: idTok.Literal}
+		if !p.expectCurrent(lexer.COLON) {
+			return nil
 		}
-
-		// Parse optional initialization
-		if p.peekTokenIs(lexer.ASSIGN) {
-			p.nextToken() // consume ':'
-			p.nextToken() // consume '='
-			p.nextToken() // move to init expr
+		typeTok := p.curToken
+		if !p.expectCurrent(lexer.TYPEID) {
+			return nil
+		}
+		binding.Type = &ast.TypeIdentifier{Token: typeTok, Value: typeTok.Literal}
+		if p.curTokenIs(lexer.ASSIGN) {
+			p.nextToken()
 			binding.Init = p.parseExpression(LOWEST)
 		}
-
 		exp.Bindings = append(exp.Bindings, binding)
-
-		// Check for more bindings
 		if !p.peekTokenIs(lexer.COMMA) {
 			break
 		}
-		p.nextToken() // consume ','
-		p.nextToken() // move to next binding
+		p.nextToken()
+		p.nextToken()
 	}
-
 	if !p.expectCurrent(lexer.IN) {
 		return nil
 	}
-
-	p.nextToken() // move to body expr
 	exp.In = p.parseExpression(LOWEST)
-
 	return exp
 }
 
@@ -589,78 +526,53 @@ func (p *Parser) parseAssignment(left ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseDynamicDispatch(left ast.Expression) ast.Expression {
-	exp := &ast.DynamicDispatch{
-		Token:  p.curToken,
-		Object: left,
-	}
-
-	if !p.expectCurrent(lexer.DOT) {
+	exp := &ast.DynamicDispatch{Token: p.curToken, Object: left}
+	p.nextToken() // skip '.'
+	methodTok := p.curToken
+	if methodTok.Type != lexer.OBJECTID {
 		return nil
 	}
-
-	p.nextToken() // move to method name
-	exp.Method = &ast.ObjectIdentifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
-
-	if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.LPAREN) {
-		return nil
-	}
-
-	// Parse arguments
-	if !p.peekTokenIs(lexer.RPAREN) {
+	exp.Method = &ast.ObjectIdentifier{Token: methodTok, Value: methodTok.Literal}
+	p.nextToken()
+	if p.curTokenIs(lexer.LPAREN) {
 		p.nextToken()
-		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+		if !p.peekTokenIs(lexer.RPAREN) {
+			exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+		}
+		if !p.expectCurrent(lexer.RPAREN) {
+			return nil
+		}
 	}
-
-	if !p.expectCurrent(lexer.RPAREN) {
-		return nil
-	}
-
 	return exp
 }
 
 func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
-	exp := &ast.StaticDispatch{
-		Token:  p.curToken,
-		Object: left,
-	}
-
-	if !p.expectCurrent(lexer.AT) {
+	exp := &ast.StaticDispatch{Token: p.curToken, Object: left}
+	p.nextToken() // skip '@'
+	typeTok := p.curToken
+	if typeTok.Type != lexer.TYPEID {
 		return nil
 	}
-
-	p.nextToken() // move to type
-	exp.Type = &ast.TypeIdentifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
-
-	if !p.expectCurrent(lexer.TYPEID) || !p.expectCurrent(lexer.DOT) {
+	exp.Type = &ast.TypeIdentifier{Token: typeTok, Value: typeTok.Literal}
+	p.nextToken()
+	if !p.expectCurrent(lexer.DOT) {
 		return nil
 	}
-
-	p.nextToken() // move to method name
-	exp.Method = &ast.ObjectIdentifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
-
-	if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.LPAREN) {
+	methodTok := p.curToken
+	if methodTok.Type != lexer.OBJECTID {
 		return nil
 	}
-
-	// Parse arguments
-	if !p.peekTokenIs(lexer.RPAREN) {
+	exp.Method = &ast.ObjectIdentifier{Token: methodTok, Value: methodTok.Literal}
+	p.nextToken()
+	if p.curTokenIs(lexer.LPAREN) {
 		p.nextToken()
-		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+		if !p.peekTokenIs(lexer.RPAREN) {
+			exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+		}
+		if !p.expectCurrent(lexer.RPAREN) {
+			return nil
+		}
 	}
-
-	if !p.expectCurrent(lexer.RPAREN) {
-		return nil
-	}
-
 	return exp
 }
 
