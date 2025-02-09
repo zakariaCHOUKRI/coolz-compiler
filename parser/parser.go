@@ -12,13 +12,63 @@ type Parser struct {
 	curToken  lexer.Token
 	peekToken lexer.Token
 	errors    []string
+
+	prefixParseFns map[lexer.TokenType]prefixParseFn
+	infixParseFns  map[lexer.TokenType]infixParseFn
 }
+
+type (
+	prefixParseFn func() ast.Expression
+	infixParseFn  func(ast.Expression) ast.Expression
+)
+
+const (
+	_ int = iota
+	LOWEST
+	EQUALS      // ==
+	LESSGREATER // > or <
+	SUM         // +
+	PRODUCT     // *
+	PREFIX      // -X or !X
+	CALL        // myFunction(X)
+)
 
 func New(l *lexer.Lexer) *Parser {
 	p := &Parser{
 		l:      l,
 		errors: []string{},
 	}
+
+	p.prefixParseFns = make(map[lexer.TokenType]prefixParseFn)
+	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
+
+	// Register prefix parsers
+	p.registerPrefix(lexer.OBJECTID, p.parseIdentifier)
+	p.registerPrefix(lexer.INT_CONST, p.parseIntegerLiteral)
+	p.registerPrefix(lexer.STR_CONST, p.parseStringLiteral)
+	p.registerPrefix(lexer.BOOL_CONST, p.parseBooleanLiteral)
+	p.registerPrefix(lexer.IF, p.parseIfExpression)
+	p.registerPrefix(lexer.WHILE, p.parseWhileExpression)
+	p.registerPrefix(lexer.NEW, p.parseNewExpression)
+	p.registerPrefix(lexer.ISVOID, p.parseIsVoidExpression)
+	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
+	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
+	p.registerPrefix(lexer.CASE, p.parseCaseExpression)
+	p.registerPrefix(lexer.LET, p.parseLetExpression)
+	p.registerPrefix(lexer.SELF, p.parseSelf)
+	p.registerPrefix(lexer.VOID, p.parseVoidLiteral)
+
+	// Register infix parsers
+	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
+	p.registerInfix(lexer.MINUS, p.parseInfixExpression)
+	p.registerInfix(lexer.DIVIDE, p.parseInfixExpression)
+	p.registerInfix(lexer.TIMES, p.parseInfixExpression)
+	p.registerInfix(lexer.EQ, p.parseInfixExpression)
+	p.registerInfix(lexer.LT, p.parseInfixExpression)
+	p.registerInfix(lexer.LE, p.parseInfixExpression)
+	p.registerInfix(lexer.ASSIGN, p.parseAssignment)
+	p.registerInfix(lexer.DOT, p.parseDynamicDispatch)
+	p.registerInfix(lexer.AT, p.parseStaticDispatch)
 
 	p.nextToken()
 	p.nextToken()
@@ -51,14 +101,14 @@ func (p *Parser) expectAndPeek(t lexer.TokenType) bool {
 	return false
 }
 
-// func (p *Parser) expectCurrent(t lexer.TokenType) bool {
-// 	if p.curTokenIs(t) {
-// 		p.nextToken()
-// 		return true
-// 	}
-// 	p.currentError(t)
-// 	return false
-// }
+func (p *Parser) expectCurrent(t lexer.TokenType) bool {
+	if p.curTokenIs(t) {
+		p.nextToken()
+		return true
+	}
+	p.currentError(t)
+	return false
+}
 
 func (p *Parser) peekError(t lexer.TokenType) {
 	p.errors = append(p.errors, fmt.Sprintf("Expected next token to be %v, got %v line %d col %d", t, p.peekToken.Type, p.peekToken.Line, p.peekToken.Column))
@@ -71,57 +121,53 @@ func (p *Parser) currentError(t lexer.TokenType) {
 func (p *Parser) ParseProgram() *ast.Program {
 	prog := &ast.Program{}
 	for p.curToken.Type != lexer.EOF && p.curToken.Type != lexer.ERROR {
-		c := p.ParseClass()
-		if c != nil {
-			prog.Classes = append(prog.Classes, c)
+		c := p.parseClass()
+
+		if !p.expectAndPeek(lexer.SEMI) {
+			continue // sf error handled by method aslan
 		}
 		p.nextToken()
+		prog.Classes = append(prog.Classes, c)
 	}
 	return prog
 }
 
-func (p *Parser) ParseClass() *ast.Class {
-	c := &ast.Class{Token: p.curToken}
+func (p *Parser) parseClass() *ast.Class {
 
-	// Check if current token is CLASS
-	if !p.curTokenIs(lexer.CLASS) {
-		p.currentError(lexer.CLASS)
+	c := &ast.Class{Token: p.curToken}
+	if !p.expectCurrent(lexer.CLASS) {
 		return nil
 	}
-	p.nextToken() // Move to class name
 
-	// Parse class name
 	if !p.curTokenIs(lexer.TYPEID) {
 		p.currentError(lexer.TYPEID)
 		return nil
 	}
-	c.Name = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken() // Move past class name
 
-	// Check for inheritance
-	if p.curTokenIs(lexer.INHERITS) {
-		p.nextToken()
-		if !p.curTokenIs(lexer.TYPEID) {
-			p.currentError(lexer.TYPEID)
-			return nil
-		}
-		c.Parent = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-		p.nextToken()
-	}
-
-	// Parse class body
-	if !p.curTokenIs(lexer.LBRACE) {
-		p.currentError(lexer.LBRACE)
-		return nil
+	c.Name = &ast.TypeIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
 	}
 	p.nextToken()
 
-	// Parse features
-	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
-		feature := p.parseFeature()
-		c.Features = append(c.Features, feature)
-		if !p.curTokenIs(lexer.SEMI) {
-			p.currentError(lexer.SEMI)
+	if p.curTokenIs(lexer.INHERITS) {
+		if !p.expectAndPeek(lexer.TYPEID) {
+			return nil
+		}
+		c.Parent = &ast.TypeIdentifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		}
+		p.nextToken()
+	}
+
+	if !p.expectCurrent(lexer.LBRACE) {
+		return nil
+	}
+
+	for !p.curTokenIs(lexer.RBRACE) {
+		c.Features = append(c.Features, p.parseFeature())
+		if !p.expectAndPeek(lexer.SEMI) {
 			return nil
 		}
 		p.nextToken()
@@ -131,503 +177,321 @@ func (p *Parser) ParseClass() *ast.Class {
 		p.currentError(lexer.RBRACE)
 		return nil
 	}
-	p.nextToken()
 
 	return c
 }
 
 func (p *Parser) parseFeature() ast.Feature {
-	switch p.curToken.Type {
-	case lexer.OBJECTID:
-		if p.peekTokenIs(lexer.LPAREN) {
-			return p.parseMethod()
-		}
-		return p.parseAttribute()
-	default:
-		p.errors = append(p.errors, fmt.Sprintf("unexpected token: %s", p.curToken.Type))
-		return nil
+	if p.peekTokenIs(lexer.LPAREN) {
+		return p.parseMethod()
 	}
+	return p.parseAttribute()
 }
 
 func (p *Parser) parseMethod() *ast.Method {
-	method := &ast.Method{Token: p.curToken}
+	method := &ast.Method{
+		Name: &ast.ObjectIdentifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		},
+	}
 
-	// Parse method name
-	if !p.curTokenIs(lexer.OBJECTID) {
-		p.currentError(lexer.OBJECTID)
+	if !p.expectCurrent(lexer.OBJECTID) {
 		return nil
 	}
-	method.Name = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
 
-	// Parse parameter list
-	if !p.curTokenIs(lexer.LPAREN) {
-		p.currentError(lexer.LPAREN)
+	// Parse formals
+	if !p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken()
+		method.Formals = p.parseFormals()
+	}
+
+	if !p.expectAndPeek(lexer.RPAREN) || !p.expectAndPeek(lexer.COLON) || !p.expectAndPeek(lexer.TYPEID) {
 		return nil
 	}
-	p.nextToken()
 
-	method.Formals = p.parseFormals()
+	method.Type = &ast.TypeIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
 
-	if !p.curTokenIs(lexer.RPAREN) {
-		p.currentError(lexer.RPAREN)
+	if !p.expectAndPeek(lexer.LBRACE) {
 		return nil
 	}
-	p.nextToken()
-
-	// Parse return type
-	if !p.curTokenIs(lexer.COLON) {
-		p.currentError(lexer.COLON)
-		return nil
-	}
-	p.nextToken()
-
-	if !p.curTokenIs(lexer.TYPEID) {
-		p.currentError(lexer.TYPEID)
-		return nil
-	}
-	method.ReturnType = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
 
 	// Parse method body
-	if !p.curTokenIs(lexer.LBRACE) {
-		p.currentError(lexer.LBRACE)
+	p.nextToken()
+	method.Body = p.parseExpression(LOWEST)
+
+	if !p.expectAndPeek(lexer.RBRACE) {
 		return nil
 	}
-	p.nextToken()
-
-	// Handle empty method body
-	if p.curTokenIs(lexer.RBRACE) {
-		method.Body = &ast.Block{
-			Token:       p.curToken,
-			Expressions: []ast.Expression{},
-		}
-		p.nextToken()
-		return method
-	}
-
-	// Parse method body expressions
-	method.Body = p.parseBlockExpression()
 
 	return method
 }
 
-func (p *Parser) parseAttribute() *ast.Attribute {
-	a := &ast.Attribute{Token: p.curToken}
-
-	// Parse attribute name (we're already at the identifier)
-	if !p.curTokenIs(lexer.OBJECTID) {
-		p.currentError(lexer.OBJECTID)
-		return nil
-	}
-	a.Name = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
-
-	// Parse colon
-	if !p.curTokenIs(lexer.COLON) {
-		p.currentError(lexer.COLON)
-		return nil
-	}
-	p.nextToken()
-
-	// Parse type
-	if !p.curTokenIs(lexer.TYPEID) {
-		p.currentError(lexer.TYPEID)
-		return nil
-	}
-	a.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
-
-	// Handle initialization if present
-	if p.curTokenIs(lexer.ASSIGN) {
-		p.nextToken()
-		a.Init = p.parseExpression()
-	}
-
-	return a
-}
-
-func (p *Parser) parseFormals() []*ast.Formal {
-	var formals []*ast.Formal
-
-	// Empty parameter list
-	if p.curTokenIs(lexer.RPAREN) {
-		return formals
-	}
-
-	// First parameter
-	formal := p.parseFormal()
-	if formal != nil {
-		formals = append(formals, formal)
-	}
-
-	// Additional parameters
-	for p.curTokenIs(lexer.COMMA) {
-		p.nextToken()
-		formal := p.parseFormal()
-		if formal != nil {
-			formals = append(formals, formal)
-		}
-	}
-
-	return formals
-}
-
 func (p *Parser) parseFormal() *ast.Formal {
-	formal := &ast.Formal{Token: p.curToken}
-
-	// Parse parameter name
-	if !p.curTokenIs(lexer.OBJECTID) {
-		p.currentError(lexer.OBJECTID)
+	formal := &ast.Formal{
+		Name: &ast.ObjectIdentifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		},
+	}
+	if !p.expectCurrent(lexer.OBJECTID) {
 		return nil
 	}
-	formal.Name = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
 
-	// Parse colon
-	if !p.curTokenIs(lexer.COLON) {
-		p.currentError(lexer.COLON)
+	if !p.expectCurrent(lexer.COLON) {
 		return nil
 	}
-	p.nextToken()
 
-	// Parse type
+	formal.Type = &ast.TypeIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
 	if !p.curTokenIs(lexer.TYPEID) {
 		p.currentError(lexer.TYPEID)
 		return nil
 	}
-	formal.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
 
 	return formal
 }
 
-func (p *Parser) parseExpression() ast.Expression {
-	left := p.parsePrefixExpression()
-	if left == nil {
-		return nil
+func (p *Parser) parseFormals() []*ast.Formal {
+	formals := []*ast.Formal{p.parseFormal()}
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		formals = append(formals, p.parseFormal())
 	}
-
-	for !p.peekTokenIs(lexer.SEMI) && !p.peekTokenIs(lexer.EOF) {
-		if p.peekTokenIs(lexer.RPAREN) || p.peekTokenIs(lexer.RBRACE) {
-			break
-		}
-
-		precedence := p.curPrecedence()
-		if precedence >= p.peekPrecedence() {
-			break
-		}
-
-		if !p.expectAndPeek(p.peekToken.Type) {
-			return nil
-		}
-
-		switch p.curToken.Type {
-		case lexer.NOT:
-			left = p.parseNotExpression()
-		case lexer.PLUS, lexer.MINUS, lexer.TIMES, lexer.DIVIDE, lexer.LT, lexer.LE, lexer.EQ:
-			left = &ast.BinaryExpression{
-				Token:    p.curToken,
-				Left:     left,
-				Operator: p.curToken.Type,
-				Right:    p.parsePrefixExpression(),
-			}
-		case lexer.ASSIGN:
-			if id, ok := left.(*ast.ObjectIdentifier); ok {
-				left = &ast.Assignment{
-					Token: p.curToken,
-					Left:  id,
-					Value: p.parseExpression(),
-				}
-			} else {
-				p.errors = append(p.errors, "left side of assignment must be an identifier")
-				return nil
-			}
-		}
-	}
-
-	return left
+	return formals
 }
 
-func (p *Parser) parseIfExpression() *ast.Conditional {
-	conditional := &ast.Conditional{Token: p.curToken}
+func (p *Parser) parseAttribute() *ast.Attribute {
+	attribute := &ast.Attribute{
+		Name: &ast.ObjectIdentifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		},
+	}
 
-	p.nextToken() // move past 'if'
-
-	conditional.Predicate = p.parseExpression()
-
-	if !p.curTokenIs(lexer.THEN) {
-		p.currentError(lexer.THEN)
+	if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.COLON) {
 		return nil
 	}
-	p.nextToken() // move past 'then'
 
-	conditional.ThenBranch = p.parseExpression()
-
-	if !p.curTokenIs(lexer.ELSE) {
-		p.currentError(lexer.ELSE)
-		return nil
+	attribute.Type = &ast.TypeIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
 	}
-	p.nextToken() // move past 'else'
-
-	conditional.ElseBranch = p.parseExpression()
-
-	if !p.curTokenIs(lexer.FI) {
-		p.currentError(lexer.FI)
-		return nil
-	}
-	p.nextToken() // move past 'fi'
-
-	return conditional
-}
-
-// Update parseWhileExpression to handle WHILE, LOOP, and POOL correctly
-func (p *Parser) parseWhileExpression() *ast.Loop {
-	exp := &ast.Loop{Token: p.curToken}
-	p.nextToken() // Consume WHILE
-
-	exp.Condition = p.parseExpression()
-
-	if !p.curTokenIs(lexer.LOOP) {
-		p.currentError(lexer.LOOP)
-		return nil
-	}
-	p.nextToken() // Consume LOOP
-
-	exp.Body = p.parseExpression()
-
-	if !p.curTokenIs(lexer.POOL) {
-		p.currentError(lexer.POOL)
-		return nil
-	}
-	p.nextToken() // Consume POOL
-
-	return exp
-}
-
-func (p *Parser) parseLetExpression() *ast.Let {
-	letExp := &ast.Let{Token: p.curToken}
-
-	p.nextToken() // move past 'let'
-
-	// Parse variable name
-	if !p.curTokenIs(lexer.OBJECTID) {
-		p.currentError(lexer.OBJECTID)
-		return nil
-	}
-	letExp.VarName = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
-
-	// Parse type annotation
-	if !p.curTokenIs(lexer.COLON) {
-		p.currentError(lexer.COLON)
-		return nil
-	}
-	p.nextToken()
 
 	if !p.curTokenIs(lexer.TYPEID) {
 		p.currentError(lexer.TYPEID)
 		return nil
 	}
-	letExp.VarType = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken()
 
 	// Parse optional initialization
-	if p.curTokenIs(lexer.ASSIGN) {
-		p.nextToken()
-		letExp.VarInit = p.parseExpression()
+	if p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken() // consume ':'
+		p.nextToken() // consume '='
+		p.nextToken() // move to init expr
+		attribute.Init = p.parseExpression(LOWEST)
 	}
 
-	if !p.curTokenIs(lexer.IN) {
-		p.currentError(lexer.IN)
-		return nil
-	}
-	p.nextToken()
-
-	letExp.Body = p.parseExpression()
-
-	return letExp
+	return attribute
 }
 
-// Update parseNewExpression to correctly handle NEW and TYPEID
-func (p *Parser) parseNewExpression() *ast.New {
-	exp := &ast.New{Token: p.curToken}
-	p.nextToken() // Consume NEW
-
-	if !p.curTokenIs(lexer.TYPEID) {
-		p.currentError(lexer.TYPEID)
-		return nil
-	}
-	exp.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
-	p.nextToken() // Consume TYPEID
-	return exp
+func (p *Parser) registerPrefix(tokenType lexer.TokenType, fn prefixParseFn) {
+	p.prefixParseFns[tokenType] = fn
 }
 
-// Update parseIsVoidExpression to consume the ISVOID token
-func (p *Parser) parseIsVoidExpression() *ast.IsVoid {
-	exp := &ast.IsVoid{Token: p.curToken}
-	p.nextToken() // Consume ISVOID
-	exp.Expr = p.parseExpression()
-	return exp
+func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
+	p.infixParseFns[tokenType] = fn
 }
 
-// Update parseNotExpression to use the token's literal
-func (p *Parser) parseNotExpression() ast.Expression {
-	token := p.curToken
-	if !p.expectAndPeek(p.peekToken.Type) {
+func (p *Parser) parseExpression(precedence int) ast.Expression {
+	prefix := p.prefixParseFns[p.curToken.Type]
+	if prefix == nil {
+		// p.noPrefixParseFnError(p.curToken.Type)
 		return nil
 	}
-
-	return &ast.UnaryExpression{
-		Token:    token,
-		Operator: lexer.NOT,
-		Right:    p.parseExpression(),
-	}
-}
-
-func (p *Parser) parseBlockExpression() *ast.Block {
-	block := &ast.Block{Token: p.curToken}
-	block.Expressions = []ast.Expression{}
-
-	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
-		expr := p.parseExpression()
-		if expr != nil {
-			block.Expressions = append(block.Expressions, expr)
-		}
-
-		if !p.curTokenIs(lexer.SEMI) {
-			p.currentError(lexer.SEMI)
-			return nil
-		}
-		p.nextToken()
-	}
-
-	if !p.curTokenIs(lexer.RBRACE) {
-		p.currentError(lexer.RBRACE)
-		return nil
-	}
-	p.nextToken()
-
-	return block
-}
-
-func (p *Parser) parseBinaryExpression(precedence int) ast.Expression {
-	left := p.parsePrefixExpression()
-	if left == nil {
-		return nil
-	}
+	leftExp := prefix()
 
 	for !p.peekTokenIs(lexer.SEMI) && precedence < p.peekPrecedence() {
-		operatorToken := p.peekToken
-		if !p.expectAndPeek(operatorToken.Type) {
-			return nil
+		infix := p.infixParseFns[p.peekToken.Type]
+		if infix == nil {
+			return leftExp
 		}
-
-		operator := operatorToken.Type
-		curPrecedence := p.curPrecedence()
-
-		right := p.parseBinaryExpression(curPrecedence)
-		if right == nil {
-			return nil
-		}
-
-		left = &ast.BinaryExpression{
-			Token:    operatorToken,
-			Left:     left,
-			Operator: operator,
-			Right:    right,
-		}
+		p.nextToken()
+		leftExp = infix(leftExp)
 	}
 
-	return left
+	return leftExp
+}
+
+func (p *Parser) parseIdentifier() ast.Expression {
+	return &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseIntegerLiteral() ast.Expression {
+	num, err := strconv.ParseInt(p.curToken.Literal, 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &ast.IntegerLiteral{Token: p.curToken, Value: num}
+}
+
+func (p *Parser) parseStringLiteral() ast.Expression {
+	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseBooleanLiteral() ast.Expression {
+	return &ast.BooleanLiteral{Token: p.curToken, Value: p.curToken.Literal == "true"}
+}
+
+func (p *Parser) parseGroupedExpression() ast.Expression {
+	p.nextToken()
+	exp := p.parseExpression(LOWEST)
+	if !p.expectCurrent(lexer.RPAREN) {
+		return nil
+	}
+	return exp
+}
+
+func (p *Parser) parseCaseExpression() ast.Expression {
+	exp := &ast.CaseExpression{Token: p.curToken}
+
+	if !p.expectCurrent(lexer.CASE) {
+		return nil
+	}
+
+	exp.Expr = p.parseExpression(LOWEST)
+
+	if !p.expectCurrent(lexer.OF) {
+		return nil
+	}
+
+	for !p.curTokenIs(lexer.ESAC) {
+		branch := &ast.CaseBranch{
+			Identifier: &ast.ObjectIdentifier{Token: p.curToken},
+			Type:       &ast.TypeIdentifier{Token: p.curToken},
+		}
+
+		if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.COLON) || !p.expectCurrent(lexer.TYPEID) {
+			return nil
+		}
+
+		branch.Type.Value = p.curToken.Literal
+		p.nextToken() // consume '=>'
+		branch.Expr = p.parseExpression(LOWEST)
+		exp.Branches = append(exp.Branches, branch)
+
+		if !p.curTokenIs(lexer.SEMI) {
+			break
+		}
+		p.nextToken()
+	}
+
+	if !p.expectCurrent(lexer.ESAC) {
+		return nil
+	}
+	return exp
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {
-	switch p.curToken.Type {
-	case lexer.IF:
-		return p.parseIfExpression()
-	case lexer.WHILE:
-		return p.parseWhileExpression()
-	case lexer.LET:
-		return p.parseLetExpression()
-	case lexer.LBRACE:
-		return p.parseBlockExpression()
-	case lexer.NEW:
-		return p.parseNewExpression()
-	case lexer.ISVOID:
-		return p.parseIsVoidExpression()
-	case lexer.NOT, lexer.NEG:
-		return p.parseUnaryExpression()
-	default:
-		return p.parsePrimaryExpression()
+	exp := &ast.UnaryExpression{
+		Token:    p.curToken,
+		Operator: p.curToken.Literal,
 	}
-}
-
-func (p *Parser) parseUnaryExpression() ast.Expression {
-	operator := p.curToken.Type // store token type
-	tok := p.curToken
 	p.nextToken()
-
-	return &ast.UnaryExpression{
-		Token:    tok,
-		Operator: operator, // operator is lexer.TokenType
-		Right:    p.parseBinaryExpression(PREFIX),
-	}
+	exp.Right = p.parseExpression(PREFIX)
+	return exp
 }
 
-func (p *Parser) parsePrimaryExpression() ast.Expression {
-	switch p.curToken.Type {
-	case lexer.INT_CONST:
-		value, err := strconv.ParseInt(p.curToken.Literal, 10, 64)
-		if err != nil {
-			p.errors = append(p.errors, fmt.Sprintf("could not parse integer literal: %v", err))
-			return nil
-		}
-		return &ast.IntegerLiteral{Token: p.curToken, Value: value}
-	case lexer.STR_CONST:
-		return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
-	case lexer.BOOL_CONST:
-		return &ast.BooleanLiteral{Token: p.curToken, Value: p.curToken.Literal == "true"}
-	case lexer.OBJECTID:
-		if p.peekTokenIs(lexer.ASSIGN) {
-			name := &ast.ObjectIdentifier{
-				Token: p.curToken,
-				Value: p.curToken.Literal,
-			}
-			assignToken := p.peekToken
-			p.nextToken() // consume OBJECTID
-			p.nextToken() // consume ASSIGN
-			right := p.parseExpression()
-			return &ast.Assignment{
-				Token: assignToken,
-				Left:  name,
-				Value: right,
-			}
-		}
-		return &ast.ObjectIdentifier{
-			Token: p.curToken,
-			Value: p.curToken.Literal,
-		}
-	case lexer.LPAREN:
-		p.nextToken()
-		expr := p.parseExpression()
-		if !p.curTokenIs(lexer.RPAREN) {
-			p.currentError(lexer.RPAREN)
-			return nil
-		}
-		p.nextToken() // consume ')'
-		return expr
-	default:
-		p.errors = append(p.errors, fmt.Sprintf("unexpected token in primary expression: %s", p.curToken.Type))
+func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
+	exp := &ast.BinaryExpression{
+		Token:    p.curToken,
+		Left:     left,
+		Operator: p.curToken.Literal,
+	}
+	precedence := p.curPrecedence()
+	p.nextToken()
+	exp.Right = p.parseExpression(precedence)
+	return exp
+}
+
+func (p *Parser) parseIfExpression() ast.Expression {
+	exp := &ast.IfExpression{Token: p.curToken}
+
+	if !p.expectCurrent(lexer.IF) {
 		return nil
 	}
+
+	exp.Condition = p.parseExpression(LOWEST)
+
+	if !p.expectCurrent(lexer.THEN) {
+		return nil
+	}
+
+	exp.Consequence = p.parseExpression(LOWEST)
+
+	if !p.expectCurrent(lexer.ELSE) {
+		return nil
+	}
+
+	exp.Alternative = p.parseExpression(LOWEST)
+
+	if !p.expectCurrent(lexer.FI) {
+		return nil
+	}
+
+	return exp
 }
 
-func (p *Parser) peekPrecedence() int {
-	if p, ok := precedences[p.peekToken.Type]; ok {
-		return p
+func (p *Parser) parseWhileExpression() ast.Expression {
+	exp := &ast.WhileExpression{Token: p.curToken}
+
+	if !p.expectCurrent(lexer.WHILE) {
+		return nil
 	}
-	return LOWEST
+
+	exp.Condition = p.parseExpression(LOWEST)
+
+	if !p.expectCurrent(lexer.LOOP) {
+		return nil
+	}
+
+	exp.Body = p.parseExpression(LOWEST)
+
+	if !p.expectCurrent(lexer.POOL) {
+		return nil
+	}
+
+	return exp
+}
+
+func (p *Parser) parseNewExpression() ast.Expression {
+	exp := &ast.NewExpression{Token: p.curToken}
+
+	if !p.expectCurrent(lexer.NEW) {
+		return nil
+	}
+
+	exp.Type = &ast.TypeIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	return exp
+}
+
+func (p *Parser) parseIsVoidExpression() ast.Expression {
+	exp := &ast.IsVoidExpression{Token: p.curToken}
+
+	p.nextToken()
+
+	exp.Expression = p.parseExpression(LOWEST)
+
+	return exp
 }
 
 func (p *Parser) curPrecedence() int {
@@ -637,28 +501,197 @@ func (p *Parser) curPrecedence() int {
 	return LOWEST
 }
 
-// Update precedences to ensure proper operator precedence
+func (p *Parser) peekPrecedence() int {
+	if p, ok := precedences[p.peekToken.Type]; ok {
+		return p
+	}
+	return LOWEST
+}
+
 var precedences = map[lexer.TokenType]int{
 	lexer.EQ:     EQUALS,
 	lexer.LT:     LESSGREATER,
 	lexer.LE:     LESSGREATER,
 	lexer.PLUS:   SUM,
 	lexer.MINUS:  SUM,
-	lexer.TIMES:  PRODUCT,
 	lexer.DIVIDE: PRODUCT,
-	lexer.ASSIGN: ASSIGN,
-	lexer.NOT:    PREFIX,
-	lexer.NEG:    PREFIX,
+	lexer.TIMES:  PRODUCT,
 	lexer.LPAREN: CALL,
+	lexer.ASSIGN: LOWEST,
+	lexer.DOT:    CALL,
+	lexer.AT:     CALL,
 }
 
-const (
-	LOWEST = iota + 1
-	EQUALS
-	LESSGREATER
-	SUM
-	PRODUCT
-	PREFIX
-	CALL
-	ASSIGN
-)
+func (p *Parser) parseLetExpression() ast.Expression {
+	exp := &ast.LetExpression{Token: p.curToken}
+
+	if !p.expectCurrent(lexer.LET) {
+		return nil
+	}
+
+	// Parse bindings
+	for {
+		binding := &ast.LetBinding{
+			Identifier: &ast.ObjectIdentifier{Token: p.curToken},
+		}
+
+		if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.COLON) || !p.expectCurrent(lexer.TYPEID) {
+			return nil
+		}
+
+		binding.Type = &ast.TypeIdentifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		}
+
+		// Parse optional initialization
+		if p.peekTokenIs(lexer.ASSIGN) {
+			p.nextToken() // consume ':'
+			p.nextToken() // consume '='
+			p.nextToken() // move to init expr
+			binding.Init = p.parseExpression(LOWEST)
+		}
+
+		exp.Bindings = append(exp.Bindings, binding)
+
+		// Check for more bindings
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
+		p.nextToken() // consume ','
+		p.nextToken() // move to next binding
+	}
+
+	if !p.expectCurrent(lexer.IN) {
+		return nil
+	}
+
+	p.nextToken() // move to body expr
+	exp.In = p.parseExpression(LOWEST)
+
+	return exp
+}
+
+func (p *Parser) parseAssignment(left ast.Expression) ast.Expression {
+	exp := &ast.Assignment{
+		Token: p.curToken,
+		Left:  left, // The left-hand side of the assignment
+	}
+
+	if !p.expectCurrent(lexer.ASSIGN) {
+		return nil
+	}
+
+	p.nextToken() // Move to the value expression
+	exp.Value = p.parseExpression(LOWEST)
+
+	return exp
+}
+
+func (p *Parser) parseDynamicDispatch(left ast.Expression) ast.Expression {
+	exp := &ast.DynamicDispatch{
+		Token:  p.curToken,
+		Object: left,
+	}
+
+	if !p.expectCurrent(lexer.DOT) {
+		return nil
+	}
+
+	p.nextToken() // move to method name
+	exp.Method = &ast.ObjectIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.LPAREN) {
+		return nil
+	}
+
+	// Parse arguments
+	if !p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken()
+		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+	}
+
+	if !p.expectCurrent(lexer.RPAREN) {
+		return nil
+	}
+
+	return exp
+}
+
+func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
+	exp := &ast.StaticDispatch{
+		Token:  p.curToken,
+		Object: left,
+	}
+
+	if !p.expectCurrent(lexer.AT) {
+		return nil
+	}
+
+	p.nextToken() // move to type
+	exp.Type = &ast.TypeIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	if !p.expectCurrent(lexer.TYPEID) || !p.expectCurrent(lexer.DOT) {
+		return nil
+	}
+
+	p.nextToken() // move to method name
+	exp.Method = &ast.ObjectIdentifier{
+		Token: p.curToken,
+		Value: p.curToken.Literal,
+	}
+
+	if !p.expectCurrent(lexer.OBJECTID) || !p.expectCurrent(lexer.LPAREN) {
+		return nil
+	}
+
+	// Parse arguments
+	if !p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken()
+		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+	}
+
+	if !p.expectCurrent(lexer.RPAREN) {
+		return nil
+	}
+
+	return exp
+}
+
+func (p *Parser) parseSelf() ast.Expression {
+	return &ast.Self{Token: p.curToken}
+}
+
+func (p *Parser) parseVoidLiteral() ast.Expression {
+	return &ast.VoidLiteral{Token: p.curToken}
+}
+
+func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
+	var args []ast.Expression
+
+	if p.peekTokenIs(end) {
+		p.nextToken()
+		return args
+	}
+
+	p.nextToken()
+	args = append(args, p.parseExpression(LOWEST))
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // consume ','
+		p.nextToken() // move to next expr
+		args = append(args, p.parseExpression(LOWEST))
+	}
+
+	if !p.expectCurrent(end) {
+		return nil
+	}
+
+	return args
+}

@@ -7,235 +7,529 @@ import (
 	"testing"
 )
 
-func newParserFromInput(input string) *Parser {
+func TestClassDefinition(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        {
+            out_string("Hello, World!\n");
+        }
+    };
+};
+`
+
 	l := lexer.NewLexer(strings.NewReader(input))
-	return New(l)
-}
+	p := New(l)
+	program := p.ParseProgram()
 
-func checkParserErrors(t *testing.T, p *Parser, i int) {
-	errors := p.Errors()
-	if len(errors) > 0 {
-		t.Errorf("parser has %d errors for test case %d", len(errors), i)
-		for _, msg := range errors {
-			t.Errorf("parser error: %q", msg)
-		}
-		t.FailNow()
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	if method.Name.Value != "main" {
+		t.Fatalf("method name not 'main'. got=%s", method.Name.Value)
+	}
+
+	if method.Type.Value != "Object" {
+		t.Fatalf("method return type not 'Object'. got=%s", method.Type.Value)
 	}
 }
 
-func TestClassParser(t *testing.T) {
-	tests := []struct {
-		input          string
-		expectedName   string
-		expectedParent string
-	}{
-		{
-			input:          "class Main {};",
-			expectedName:   "Main",
-			expectedParent: "",
-		},
-		{
-			input:          "class A {age:Integer<-30;};",
-			expectedName:   "A",
-			expectedParent: "",
-		},
-		{
-			input:          "class B {func(): Void {};};",
-			expectedName:   "B",
-			expectedParent: "",
-		},
-		{
-			input:          "class B inherits A {func(): Void {};};",
-			expectedName:   "B",
-			expectedParent: "A",
-		},
+func TestInheritance(t *testing.T) {
+	input := `
+class Main inherits IO {
+    main() : Object {
+        {
+            out_string("Hello, World!\n");
+        }
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
 	}
 
-	for i, tt := range tests {
-		parser := newParserFromInput(tt.input)
-		class := parser.ParseClass()
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
 
-		checkParserErrors(t, parser, i)
-
-		if class.Name.Value != tt.expectedName {
-			t.Fatalf("[%q]: expected class name to be %q got %q", tt.input, tt.expectedName, class.Name.Value)
-		}
-
-		if class.Parent != nil {
-			if class.Parent.Value != tt.expectedParent {
-				t.Fatalf("[%q]: expected class parent to be %q got %q", tt.input, tt.expectedParent, class.Parent.Value)
-			}
-		} else if tt.expectedParent != "" {
-			t.Fatalf("[%q]: expected class parent to be %q got nil", tt.input, tt.expectedParent)
-		}
+	if class.Parent.Value != "IO" {
+		t.Fatalf("class parent not 'IO'. got=%s", class.Parent.Value)
 	}
 }
 
-func TestFormalParsing(t *testing.T) {
-	tests := []struct {
-		input         string
-		expectedNames []string
-		expectedTypes []string
-	}{
-		{
-			input:         "var1:Integer",
-			expectedNames: []string{"var1"},
-			expectedTypes: []string{"Integer"},
-		},
-		{
-			input:         "var1:Integer,var2:Boolean,var3:String",
-			expectedNames: []string{"var1", "var2", "var3"},
-			expectedTypes: []string{"Integer", "Boolean", "String"},
-		},
+func TestMethodWithFormals(t *testing.T) {
+	input := `
+class Main {
+    add(x : Int, y : Int) : Int {
+        x + y
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
 	}
 
-	for _, tt := range tests {
-		parser := newParserFromInput(tt.input)
-		formals := parser.parseFormals()
-
-		if len(parser.errors) > 0 {
-			for _, err := range parser.errors {
-				t.Errorf("Parsing Error %s\n", err)
-			}
-			t.Fatalf("[%q]: Found errors while parsing", tt.input)
-		}
-
-		if len(formals) != len(tt.expectedNames) {
-			t.Fatalf("[%q]: expected %d formals got %d: %v", tt.input, len(tt.expectedNames), len(formals), formals)
-		}
-
-		for i, formal := range formals {
-			if formal.Name.Value != tt.expectedNames[i] {
-				t.Fatalf("[%q]: expected formal name to be %q got %q", tt.input, tt.expectedNames[i], formal.Name.Value)
-			}
-			if formal.Type.Value != tt.expectedTypes[i] {
-				t.Fatalf("[%q]: expected formal type to be %q got %q", tt.input, tt.expectedTypes[i], formal.Type.Value)
-			}
-		}
-	}
-}
-
-func TestMethodParsing(t *testing.T) {
-	tests := []struct {
-		input               string
-		expectedMethodName  string
-		expectedFormalNames []string
-		expectedFormalTypes []string
-		expectedMethodType  string
-	}{
-		{
-			input:               "main(): Void {};",
-			expectedMethodName:  "main",
-			expectedFormalNames: []string{},
-			expectedFormalTypes: []string{},
-			expectedMethodType:  "Void",
-		},
-		{
-			input:               "sum(a:Integer,b:Integer): Integer {};",
-			expectedMethodName:  "sum",
-			expectedFormalNames: []string{"a", "b"},
-			expectedFormalTypes: []string{"Integer", "Integer"},
-			expectedMethodType:  "Integer",
-		},
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
 	}
 
-	for i, tt := range tests {
-		parser := newParserFromInput(tt.input)
-		method := parser.parseMethod()
-		checkParserErrors(t, parser, i)
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
 
-		if method.Name.Value != tt.expectedMethodName {
-			t.Fatalf("[%q]: Expected method name to be %q found %q", tt.input, tt.expectedMethodName, method.Name.Value)
-		}
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
 
-		for i, formal := range method.Formals {
-			if formal.Name.Value != tt.expectedFormalNames[i] {
-				t.Fatalf("[%q]: Expected formal name to be %q found %q", tt.input, tt.expectedFormalNames[i], formal.Name.Value)
-			}
-			if formal.Type.Value != tt.expectedFormalTypes[i] {
-				t.Fatalf("[%q]: Expected formal type to be %q found %q", tt.input, tt.expectedFormalTypes[i], formal.Type.Value)
-			}
-		}
+	if method.Name.Value != "add" {
+		t.Fatalf("method name not 'add'. got=%s", method.Name.Value)
+	}
 
-		if method.ReturnType.Value != tt.expectedMethodType {
-			t.Fatalf("[%q]: Expected method type to be %q found %q", tt.input, tt.expectedMethodType, method.ReturnType.Value)
-		}
+	if len(method.Formals) != 2 {
+		t.Fatalf("method.Formals does not contain 2 formals. got=%d", len(method.Formals))
+	}
+
+	if method.Formals[0].Name.Value != "x" {
+		t.Fatalf("first formal name not 'x'. got=%s", method.Formals[0].Name.Value)
+	}
+
+	if method.Formals[1].Name.Value != "y" {
+		t.Fatalf("second formal name not 'y'. got=%s", method.Formals[1].Name.Value)
 	}
 }
 
-func TestAttributeParsing(t *testing.T) {
-	tests := []struct {
-		input              string
-		expectedName       string
-		expectedType       string
-		expectedExpression ast.Expression
-	}{
-		{
-			input:        "firstName:String",
-			expectedName: "firstName",
-			expectedType: "String",
-		},
-		{
-			input:        "age:Integer<-30",
-			expectedName: "age",
-			expectedType: "Integer",
-		},
+func TestIfExpression(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        if true then 1 else 0 fi
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
 	}
 
-	for i, tt := range tests {
-		parser := newParserFromInput(tt.input)
-		attribute := parser.parseAttribute()
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
 
-		checkParserErrors(t, parser, i)
-		if attribute.Name.Value != tt.expectedName {
-			t.Fatalf("[%q]: Expected attribute name to be %q got %q", tt.input, tt.expectedName, attribute.Name.Value)
-		}
-		if attribute.Type.Value != tt.expectedType {
-			t.Fatalf("[%q]: Expected attribute type to be %q got %q", tt.input, tt.expectedType, attribute.Type.Value)
-		}
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	ifExpr, ok := method.Body.(*ast.IfExpression)
+	if !ok {
+		t.Fatalf("method body is not an if expression. got=%T", method.Body)
+	}
+
+	if ifExpr.Condition.(*ast.BooleanLiteral).Value != true {
+		t.Fatalf("if condition not true. got=%v", ifExpr.Condition.(*ast.BooleanLiteral).Value)
+	}
+
+	if ifExpr.Consequence.(*ast.IntegerLiteral).Value != 1 {
+		t.Fatalf("if consequence not 1. got=%d", ifExpr.Consequence.(*ast.IntegerLiteral).Value)
+	}
+
+	if ifExpr.Alternative.(*ast.IntegerLiteral).Value != 0 {
+		t.Fatalf("if alternative not 0. got=%d", ifExpr.Alternative.(*ast.IntegerLiteral).Value)
 	}
 }
 
-func TestExpressionParsing(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"5", "5"},
-		{`"hello world"`, `"hello world"`},
-		{"true", "true"},
-		{"false", "false"},
-		{"x", "x"},
-		{"not true", "(not true)"},
-		{"1 + 2", "(1 + 2)"},
-		{"1 < 2", "(1 < 2)"},
-		{"1 <= 2", "(1 <= 2)"},
-		{"~1", "(~ 1)"},
-		{"1 = 2", "(1 = 2)"},
-		{"1 * 2", "(1 * 2)"},
-		{"isvoid 1", "isvoid 1"},
-		{"1 / 2", "(1 / 2)"},
-		{"(1 + 2)", "(1 + 2)"},
-		{"new Object", "new Object"},
-		{"x <- 5", "(x <- 5)"},
-		{"if true then 1 else 2 fi", "if true then 1 else 2 fi"},
-		{"while true loop 1 pool", "while true loop 1 pool"},
-		{"{ 1; 2; 3; }", "{ 1; 2; 3; }"},
-		{"let x: Int <- 5 in x + 1", "let x : Int <- 5 in (x + 1)"},
+func TestWhileExpression(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        while true loop 1 pool
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
 	}
 
-	for i, tt := range tests {
-		p := newParserFromInput(tt.input)
-		checkParserErrors(t, p, i)
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
 
-		expression := p.parseExpression()
-		if expression == nil {
-			t.Errorf("test [%d] expected expression to be parsed, got nil", i)
-			continue
-		}
-		actual := SerializeExpression(expression)
-		if actual != tt.expected {
-			t.Errorf("test [%d] expected expression to be '%s', got '%s'", i, tt.expected, actual)
-		}
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	whileExpr, ok := method.Body.(*ast.WhileExpression)
+	if !ok {
+		t.Fatalf("method body is not a while expression. got=%T", method.Body)
+	}
+
+	if whileExpr.Condition.(*ast.BooleanLiteral).Value != true {
+		t.Fatalf("while condition not true. got=%v", whileExpr.Condition.(*ast.BooleanLiteral).Value)
+	}
+
+	if whileExpr.Body.(*ast.IntegerLiteral).Value != 1 {
+		t.Fatalf("while body not 1. got=%d", whileExpr.Body.(*ast.IntegerLiteral).Value)
+	}
+}
+
+func TestLetExpression(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        let x : Int <- 1 in x + 2
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	letExpr, ok := method.Body.(*ast.LetExpression)
+	if !ok {
+		t.Fatalf("method body is not a let expression. got=%T", method.Body)
+	}
+
+	if len(letExpr.Bindings) != 1 {
+		t.Fatalf("let expression does not contain 1 binding. got=%d", len(letExpr.Bindings))
+	}
+
+	if letExpr.Bindings[0].Identifier.Value != "x" {
+		t.Fatalf("let binding identifier not 'x'. got=%s", letExpr.Bindings[0].Identifier.Value)
+	}
+
+	if letExpr.Bindings[0].Type.Value != "Int" {
+		t.Fatalf("let binding type not 'Int'. got=%s", letExpr.Bindings[0].Type.Value)
+	}
+
+	if letExpr.Bindings[0].Init.(*ast.IntegerLiteral).Value != 1 {
+		t.Fatalf("let binding init not 1. got=%d", letExpr.Bindings[0].Init.(*ast.IntegerLiteral).Value)
+	}
+}
+
+func TestCaseExpression(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        case 1 of
+            x : Int => x + 1;
+            y : String => y;
+        esac
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	caseExpr, ok := method.Body.(*ast.CaseExpression)
+	if !ok {
+		t.Fatalf("method body is not a case expression. got=%T", method.Body)
+	}
+
+	if len(caseExpr.Branches) != 2 {
+		t.Fatalf("case expression does not contain 2 branches. got=%d", len(caseExpr.Branches))
+	}
+
+	if caseExpr.Branches[0].Identifier.Value != "x" {
+		t.Fatalf("first branch identifier not 'x'. got=%s", caseExpr.Branches[0].Identifier.Value)
+	}
+
+	if caseExpr.Branches[0].Type.Value != "Int" {
+		t.Fatalf("first branch type not 'Int'. got=%s", caseExpr.Branches[0].Type.Value)
+	}
+
+	if caseExpr.Branches[1].Identifier.Value != "y" {
+		t.Fatalf("second branch identifier not 'y'. got=%s", caseExpr.Branches[1].Identifier.Value)
+	}
+
+	if caseExpr.Branches[1].Type.Value != "String" {
+		t.Fatalf("second branch type not 'String'. got=%s", caseExpr.Branches[1].Type.Value)
+	}
+}
+
+func TestNewExpression(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        new Int
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	newExpr, ok := method.Body.(*ast.NewExpression)
+	if !ok {
+		t.Fatalf("method body is not a new expression. got=%T", method.Body)
+	}
+
+	if newExpr.Type.Value != "Int" {
+		t.Fatalf("new expression type not 'Int'. got=%s", newExpr.Type.Value)
+	}
+}
+
+func TestIsVoidExpression(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        isvoid 1
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	isVoidExpr, ok := method.Body.(*ast.IsVoidExpression)
+	if !ok {
+		t.Fatalf("method body is not an isvoid expression. got=%T", method.Body)
+	}
+
+	if isVoidExpr.Expression.(*ast.IntegerLiteral).Value != 1 {
+		t.Fatalf("isvoid expression not 1. got=%d", isVoidExpr.Expression.(*ast.IntegerLiteral).Value)
+	}
+}
+
+func TestDynamicDispatch(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        self.foo(1, 2)
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	dispatchExpr, ok := method.Body.(*ast.DynamicDispatch)
+	if !ok {
+		t.Fatalf("method body is not a dynamic dispatch expression. got=%T", method.Body)
+	}
+
+	if dispatchExpr.Object.(*ast.Self).TokenLiteral() != "self" {
+		t.Fatalf("dispatch object not 'self'. got=%s", dispatchExpr.Object.(*ast.Self).TokenLiteral())
+	}
+
+	if dispatchExpr.Method.Value != "foo" {
+		t.Fatalf("dispatch method not 'foo'. got=%s", dispatchExpr.Method.Value)
+	}
+
+	if len(dispatchExpr.Arguments) != 2 {
+		t.Fatalf("dispatch does not contain 2 arguments. got=%d", len(dispatchExpr.Arguments))
+	}
+
+	if dispatchExpr.Arguments[0].(*ast.IntegerLiteral).Value != 1 {
+		t.Fatalf("first argument not 1. got=%d", dispatchExpr.Arguments[0].(*ast.IntegerLiteral).Value)
+	}
+
+	if dispatchExpr.Arguments[1].(*ast.IntegerLiteral).Value != 2 {
+		t.Fatalf("second argument not 2. got=%d", dispatchExpr.Arguments[1].(*ast.IntegerLiteral).Value)
+	}
+}
+
+func TestStaticDispatch(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        self@IO.out_string("Hello, World!\n")
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	dispatchExpr, ok := method.Body.(*ast.StaticDispatch)
+	if !ok {
+		t.Fatalf("method body is not a static dispatch expression. got=%T", method.Body)
+	}
+
+	if dispatchExpr.Object.(*ast.Self).TokenLiteral() != "self" {
+		t.Fatalf("dispatch object not 'self'. got=%s", dispatchExpr.Object.(*ast.Self).TokenLiteral())
+	}
+
+	if dispatchExpr.Type.Value != "IO" {
+		t.Fatalf("static dispatch type not 'IO'. got=%s", dispatchExpr.Type.Value)
+	}
+
+	if dispatchExpr.Method.Value != "out_string" {
+		t.Fatalf("dispatch method not 'out_string'. got=%s", dispatchExpr.Method.Value)
+	}
+
+	if len(dispatchExpr.Arguments) != 1 {
+		t.Fatalf("dispatch does not contain 1 argument. got=%d", len(dispatchExpr.Arguments))
+	}
+
+	strArg, ok := dispatchExpr.Arguments[0].(*ast.StringLiteral)
+	if !ok {
+		t.Fatalf("dispatch argument is not a string literal. got=%T", dispatchExpr.Arguments[0])
+	}
+
+	if strArg.Value != "Hello, World!\n" {
+		t.Fatalf("dispatch argument not 'Hello, World!\n'. got=%s", strArg.Value)
 	}
 }
