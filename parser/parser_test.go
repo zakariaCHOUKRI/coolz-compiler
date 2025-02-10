@@ -368,6 +368,21 @@ class Main {
 	p := New(l)
 	program := p.ParseProgram()
 
+	if len(p.Errors()) > 0 {
+		t.Errorf("parser has %d errors:", len(p.Errors()))
+		for _, err := range p.Errors() {
+			t.Errorf("parser error: %s", err)
+		}
+	}
+
+	// Add debugging output
+	method := program.Classes[0].Features[0].(*ast.Method)
+	t.Logf("Method body type: %T", method.Body)
+	if dispatch, ok := method.Body.(*ast.DynamicDispatch); ok {
+		t.Logf("Dispatch details: Object=%T, Method=%s, Args=%d",
+			dispatch.Object, dispatch.Method.Value, len(dispatch.Arguments))
+	}
+
 	if len(program.Classes) != 1 {
 		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
 	}
@@ -424,6 +439,21 @@ class Main {
 	l := lexer.NewLexer(strings.NewReader(input))
 	p := New(l)
 	program := p.ParseProgram()
+
+	if len(p.Errors()) > 0 {
+		t.Errorf("parser has %d errors:", len(p.Errors()))
+		for _, err := range p.Errors() {
+			t.Errorf("parser error: %s", err)
+		}
+	}
+
+	// Add debugging output
+	method := program.Classes[0].Features[0].(*ast.Method)
+	t.Logf("Method body type: %T", method.Body)
+	if dispatch, ok := method.Body.(*ast.StaticDispatch); ok {
+		t.Logf("Static dispatch details: Object=%T, Type=%s, Method=%s, Args=%d",
+			dispatch.Object, dispatch.Type.Value, dispatch.Method.Value, len(dispatch.Arguments))
+	}
 
 	if len(program.Classes) != 1 {
 		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
@@ -489,6 +519,21 @@ class Main {
 	l := lexer.NewLexer(strings.NewReader(input))
 	p := New(l)
 	program := p.ParseProgram()
+
+	if len(p.Errors()) > 0 {
+		t.Errorf("parser has %d errors:", len(p.Errors()))
+		for _, err := range p.Errors() {
+			t.Errorf("parser error: %s", err)
+		}
+	}
+
+	// Add debugging output
+	method := program.Classes[0].Features[0].(*ast.Method)
+	t.Logf("Method body type: %T", method.Body)
+	if caseExpr, ok := method.Body.(*ast.CaseExpression); ok {
+		t.Logf("Case expression details: Expr=%T, Branches=%d",
+			caseExpr.Expr, len(caseExpr.Branches))
+	}
 
 	if len(program.Classes) != 1 {
 		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))

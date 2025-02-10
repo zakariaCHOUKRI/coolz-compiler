@@ -168,6 +168,7 @@ func (l *Lexer) skipMultiLineComment() {
 }
 
 func (l *Lexer) readNumber() string {
+	// startPos := l.column
 	var sb strings.Builder
 	for unicode.IsDigit(l.char) {
 		sb.WriteRune(l.char)
@@ -244,6 +245,17 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	switch {
+	// Handle number literals first
+	case unicode.IsDigit(l.char):
+		num := l.readNumber()
+		if _, err := strconv.Atoi(num); err != nil {
+			tok.Type = ERROR
+			tok.Literal = "Number out of range"
+		} else {
+			tok.Type = INT_CONST
+			tok.Literal = num
+		}
+		return tok
 	case l.char == 0:
 		tok.Type = EOF
 		tok.Literal = ""
@@ -336,15 +348,6 @@ func (l *Lexer) NextToken() Token {
 		} else {
 			tok.Type = STR_CONST
 			tok.Literal = str
-		}
-	case unicode.IsDigit(l.char):
-		num := l.readNumber()
-		if _, err := strconv.Atoi(num); err != nil {
-			tok.Type = ERROR
-			tok.Literal = "Number out of range"
-		} else {
-			tok.Type = INT_CONST
-			tok.Literal = num
 		}
 	case isIdentifierStart(l.char):
 		identifier := l.readIdentifier()

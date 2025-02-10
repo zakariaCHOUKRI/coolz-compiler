@@ -27,8 +27,8 @@ const (
 	LOWEST
 	EQUALS      // ==
 	LESSGREATER // > or <
-	SUM         // +
-	PRODUCT     // *
+	SUM         // + or -
+	PRODUCT     // * or /
 	PREFIX      // -X or !X
 	CALL        // myFunction(X)
 )
@@ -42,9 +42,9 @@ func New(l *lexer.Lexer) *Parser {
 	p.prefixParseFns = make(map[lexer.TokenType]prefixParseFn)
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
 
-	// Register prefix parsers
-	p.registerPrefix(lexer.OBJECTID, p.parseIdentifier)
+	// Register prefix parsers - make sure INT_CONST is registered first
 	p.registerPrefix(lexer.INT_CONST, p.parseIntegerLiteral)
+	p.registerPrefix(lexer.OBJECTID, p.parseIdentifier)
 	p.registerPrefix(lexer.STR_CONST, p.parseStringLiteral)
 	p.registerPrefix(lexer.BOOL_CONST, p.parseBooleanLiteral)
 	p.registerPrefix(lexer.IF, p.parseIfExpression)
@@ -58,7 +58,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.SELF, p.parseSelf)
 	p.registerPrefix(lexer.VOID, p.parseVoidLiteral)
 
-	// Register infix parsers
+	// Register infix parsers with proper precedence
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
 	p.registerInfix(lexer.MINUS, p.parseInfixExpression)
 	p.registerInfix(lexer.DIVIDE, p.parseInfixExpression)
@@ -256,35 +256,65 @@ func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {
+	p.debugToken(fmt.Sprintf("parseExpression with precedence %d", precedence))
+
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
+		p.errors = append(p.errors, fmt.Sprintf("No prefix parse function for %v (literal: %s) found at line %d, column %d",
+			p.curToken.Type, p.curToken.Literal, p.curToken.Line, p.curToken.Column))
 		return nil
 	}
+
 	leftExp := prefix()
-	for precedence < p.peekPrecedence() {
-		infix := p.infixParseFns[p.peekToken.Type]
-		if infix == nil {
-			return leftExp
-		}
-		p.nextToken()
-		leftExp = infix(leftExp)
+	if leftExp == nil {
+		p.debugToken(fmt.Sprintf("Prefix parse function for %v returned nil", p.curToken.Type))
+		return nil
 	}
+
+	for {
+		if p.curTokenIs(lexer.SEMI) || p.curTokenIs(lexer.ESAC) || p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.DARROW) {
+			break
+		}
+
+		infix := p.infixParseFns[p.curToken.Type]
+		if infix == nil {
+			break
+		}
+
+		currPrecedence := p.curPrecedence()
+		if currPrecedence <= precedence {
+			break
+		}
+
+		p.debugToken(fmt.Sprintf("Before infix: left=%T, operator=%v", leftExp, p.curToken.Type))
+		leftExp = infix(leftExp)
+		if leftExp == nil {
+			return nil
+		}
+	}
+
 	return leftExp
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {
+	if p.curToken.Literal == "self" {
+		return &ast.Self{Token: p.curToken}
+	}
 	ident := &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken()
 	return ident
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
+	p.debugToken("Parsing integer literal")
 	num, err := strconv.ParseInt(p.curToken.Literal, 10, 64)
 	if err != nil {
+		p.errors = append(p.errors, fmt.Sprintf("Could not parse %q as integer", p.curToken.Literal))
 		return nil
 	}
 	lit := &ast.IntegerLiteral{Token: p.curToken, Value: num}
 	p.nextToken()
+	p.debugToken("After parsing integer literal")
 	return lit
 }
 
@@ -310,55 +340,80 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 }
 
 func (p *Parser) parseCaseExpression() ast.Expression {
+	p.debugToken("Starting case expression")
+
 	exp := &ast.CaseExpression{Token: p.curToken}
 	p.nextToken() // Skip 'case'
 
+	p.debugToken("Before parsing case condition")
 	exp.Expr = p.parseExpression(LOWEST)
+	if exp.Expr == nil {
+		p.errors = append(p.errors, "Failed to parse case condition")
+		return nil
+	}
+	p.debugToken(fmt.Sprintf("After parsing case condition: %T", exp.Expr))
 
 	if !p.expectCurrent(lexer.OF) {
+		p.errors = append(p.errors, fmt.Sprintf("Expected 'of' after case expression, got %s", p.curToken.Type))
 		return nil
 	}
 
 	for !p.curTokenIs(lexer.ESAC) && !p.curTokenIs(lexer.EOF) {
+		p.debugToken("Starting case branch")
+
 		branch := &ast.CaseBranch{}
-		// Parse identifier
-		if !p.expectCurrent(lexer.OBJECTID) {
+
+		if p.curToken.Type != lexer.OBJECTID {
+			p.errors = append(p.errors, fmt.Sprintf("Expected identifier in case branch, got %s", p.curToken.Type))
 			return nil
 		}
+
 		branch.Identifier = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken()
 
-		// Parse type
 		if !p.expectCurrent(lexer.COLON) {
 			return nil
 		}
-		if !p.curTokenIs(lexer.TYPEID) {
-			p.currentError(lexer.TYPEID)
+
+		if p.curToken.Type != lexer.TYPEID {
+			p.errors = append(p.errors, fmt.Sprintf("Expected type in case branch, got %s", p.curToken.Type))
 			return nil
 		}
+
 		branch.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 		p.nextToken()
 
-		// Parse darrow
 		if !p.expectCurrent(lexer.DARROW) {
 			return nil
 		}
-		p.nextToken()
 
-		// Parse expression
-		branch.Expr = p.parseExpression(LOWEST)
+		p.debugToken("Before parsing branch expression")
+		// Use LOWEST precedence to ensure we parse the entire expression
+		branchExpr := p.parseExpression(LOWEST)
+		p.debugToken(fmt.Sprintf("After parsing branch expression: %T", branchExpr))
+
+		if branchExpr == nil {
+			p.errors = append(p.errors, "Failed to parse case branch expression")
+			return nil
+		}
+		branch.Expr = branchExpr
+
 		exp.Branches = append(exp.Branches, branch)
 
-		// Consume semicolon if present
+		// Only move to next token if it's a semicolon
 		if p.curTokenIs(lexer.SEMI) {
 			p.nextToken()
+			p.debugToken("After semicolon")
+		} else if !p.curTokenIs(lexer.ESAC) {
+			p.errors = append(p.errors, fmt.Sprintf("Expected semicolon or esac after branch, got %s", p.curToken.Type))
+			return nil
 		}
 	}
 
 	if !p.expectCurrent(lexer.ESAC) {
+		p.errors = append(p.errors, fmt.Sprintf("Expected 'esac' at end of case expression, got %s", p.curToken.Type))
 		return nil
 	}
-	p.nextToken() // Move past 'esac'
 
 	return exp
 }
@@ -374,14 +429,30 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 }
 
 func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
+	p.debugToken(fmt.Sprintf("Parsing infix expression with operator %s, left=%v",
+		p.curToken.Literal, left.TokenLiteral()))
+
 	exp := &ast.BinaryExpression{
 		Token:    p.curToken,
 		Left:     left,
 		Operator: p.curToken.Literal,
 	}
+
 	precedence := p.curPrecedence()
-	p.nextToken()
+	p.nextToken() // Move past the operator
+
+	if p.curToken.Type == lexer.EOF {
+		p.errors = append(p.errors, "Unexpected EOF in infix expression")
+		return nil
+	}
+
+	p.debugToken(fmt.Sprintf("Parsing right side of %s with precedence %d", exp.Operator, precedence))
 	exp.Right = p.parseExpression(precedence)
+	if exp.Right == nil {
+		p.errors = append(p.errors, fmt.Sprintf("Failed to parse right side of %s expression", exp.Operator))
+		return nil
+	}
+
 	return exp
 }
 
@@ -483,9 +554,9 @@ var precedences = map[lexer.TokenType]int{
 	lexer.DIVIDE: PRODUCT,
 	lexer.TIMES:  PRODUCT,
 	lexer.LPAREN: CALL,
-	lexer.ASSIGN: LOWEST,
 	lexer.DOT:    CALL,
 	lexer.AT:     CALL,
+	lexer.ASSIGN: LOWEST,
 }
 
 func (p *Parser) parseLetExpression() ast.Expression {
@@ -542,60 +613,70 @@ func (p *Parser) parseAssignment(left ast.Expression) ast.Expression {
 	return exp
 }
 
-// In parseDynamicDispatch function:
+// Add this debugging function
+func (p *Parser) debugToken(prefix string) {
+	fmt.Printf("DEBUG: %s - Current Token: {Type: %v, Literal: %s, Line: %d, Column: %d}\n",
+		prefix, p.curToken.Type, p.curToken.Literal, p.curToken.Line, p.curToken.Column)
+}
+
 func (p *Parser) parseDynamicDispatch(left ast.Expression) ast.Expression {
+	p.debugToken("Starting dynamic dispatch")
+
 	exp := &ast.DynamicDispatch{Token: p.curToken, Object: left}
 	p.nextToken() // Skip '.'
 
-	methodTok := p.curToken
-	if methodTok.Type != lexer.OBJECTID {
-		p.errors = append(p.errors, fmt.Sprintf("Expected method name, got %s", methodTok.Type))
+	if p.curToken.Type != lexer.OBJECTID {
+		p.errors = append(p.errors, fmt.Sprintf("Expected method name after '.', got %s", p.curToken.Type))
 		return nil
 	}
-	exp.Method = &ast.ObjectIdentifier{Token: methodTok, Value: methodTok.Literal}
+
+	exp.Method = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken() // Move past method name
 
-	// Parse arguments if present
-	if p.curTokenIs(lexer.LPAREN) {
-		p.nextToken() // Consume '('
-		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
-		// parseExpressionList already consumes the ')', no need to check again
+	if !p.curTokenIs(lexer.LPAREN) {
+		p.errors = append(p.errors, fmt.Sprintf("Expected '(' after method name, got %s", p.curToken.Type))
+		return nil
 	}
+
+	p.nextToken() // Consume '('
+	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
 
 	return exp
 }
 
-// In parseStaticDispatch function:
 func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
+	p.debugToken("Starting static dispatch")
+
 	exp := &ast.StaticDispatch{Token: p.curToken, Object: left}
 	p.nextToken() // Skip '@'
 
-	typeTok := p.curToken
-	if typeTok.Type != lexer.TYPEID {
-		p.errors = append(p.errors, fmt.Sprintf("Expected type after @, got %s", typeTok.Type))
+	if p.curToken.Type != lexer.TYPEID {
+		p.errors = append(p.errors, fmt.Sprintf("Expected type after '@', got %s", p.curToken.Type))
 		return nil
 	}
-	exp.Type = &ast.TypeIdentifier{Token: typeTok, Value: typeTok.Literal}
+
+	exp.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken() // Move past type
 
 	if !p.expectCurrent(lexer.DOT) {
 		return nil
 	}
 
-	methodTok := p.curToken
-	if methodTok.Type != lexer.OBJECTID {
-		p.errors = append(p.errors, fmt.Sprintf("Expected method name, got %s", methodTok.Type))
+	if p.curToken.Type != lexer.OBJECTID {
+		p.errors = append(p.errors, fmt.Sprintf("Expected method name after '.', got %s", p.curToken.Type))
 		return nil
 	}
-	exp.Method = &ast.ObjectIdentifier{Token: methodTok, Value: methodTok.Literal}
+
+	exp.Method = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	p.nextToken() // Move past method name
 
-	// Parse arguments if present
-	if p.curTokenIs(lexer.LPAREN) {
-		p.nextToken() // Consume '('
-		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
-		// parseExpressionList already consumes the ')', no need to check again
+	if !p.curTokenIs(lexer.LPAREN) {
+		p.errors = append(p.errors, fmt.Sprintf("Expected '(' after method name, got %s", p.curToken.Type))
+		return nil
 	}
+
+	p.nextToken() // Consume '('
+	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
 
 	return exp
 }
@@ -611,7 +692,6 @@ func (p *Parser) parseVoidLiteral() ast.Expression {
 func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	var args []ast.Expression
 
-	// Check for empty list
 	if p.peekTokenIs(end) {
 		p.nextToken() // Consume the end token if the list is empty
 		return args
@@ -629,7 +709,6 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	if !p.expectPeek(end) {
 		return nil
 	}
-	p.nextToken() // Consume the end token
 
 	return args
 }
