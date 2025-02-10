@@ -273,66 +273,6 @@ class Main {
 	}
 }
 
-func TestCaseExpression(t *testing.T) {
-	input := `
-class Main {
-    main() : Object {
-        case 1 of
-            x : Int => x + 1;
-            y : String => y;
-        esac
-    };
-};
-`
-
-	l := lexer.NewLexer(strings.NewReader(input))
-	p := New(l)
-	program := p.ParseProgram()
-
-	if len(program.Classes) != 1 {
-		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
-	}
-
-	class := program.Classes[0]
-	if class.Name.Value != "Main" {
-		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
-	}
-
-	if len(class.Features) != 1 {
-		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
-	}
-
-	method, ok := class.Features[0].(*ast.Method)
-	if !ok {
-		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
-	}
-
-	caseExpr, ok := method.Body.(*ast.CaseExpression)
-	if !ok {
-		t.Fatalf("method body is not a case expression. got=%T", method.Body)
-	}
-
-	if len(caseExpr.Branches) != 2 {
-		t.Fatalf("case expression does not contain 2 branches. got=%d", len(caseExpr.Branches))
-	}
-
-	if caseExpr.Branches[0].Identifier.Value != "x" {
-		t.Fatalf("first branch identifier not 'x'. got=%s", caseExpr.Branches[0].Identifier.Value)
-	}
-
-	if caseExpr.Branches[0].Type.Value != "Int" {
-		t.Fatalf("first branch type not 'Int'. got=%s", caseExpr.Branches[0].Type.Value)
-	}
-
-	if caseExpr.Branches[1].Identifier.Value != "y" {
-		t.Fatalf("second branch identifier not 'y'. got=%s", caseExpr.Branches[1].Identifier.Value)
-	}
-
-	if caseExpr.Branches[1].Type.Value != "String" {
-		t.Fatalf("second branch type not 'String'. got=%s", caseExpr.Branches[1].Type.Value)
-	}
-}
-
 func TestNewExpression(t *testing.T) {
 	input := `
 class Main {
@@ -531,5 +471,65 @@ class Main {
 
 	if strArg.Value != "Hello, World!\n" {
 		t.Fatalf("dispatch argument not 'Hello, World!\n'. got=%s", strArg.Value)
+	}
+}
+
+func TestCaseExpression(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        case 1 of
+            x : Int => x + 1;
+            y : String => y;
+        esac
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	if class.Name.Value != "Main" {
+		t.Fatalf("class name not 'Main'. got=%s", class.Name.Value)
+	}
+
+	if len(class.Features) != 1 {
+		t.Fatalf("class.Features does not contain 1 feature. got=%d", len(class.Features))
+	}
+
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	caseExpr, ok := method.Body.(*ast.CaseExpression)
+	if !ok {
+		t.Fatalf("method body is not a case expression. got=%T", method.Body)
+	}
+
+	if len(caseExpr.Branches) != 2 {
+		t.Fatalf("case expression does not contain 2 branches. got=%d", len(caseExpr.Branches))
+	}
+
+	if caseExpr.Branches[0].Identifier.Value != "x" {
+		t.Fatalf("first branch identifier not 'x'. got=%s", caseExpr.Branches[0].Identifier.Value)
+	}
+
+	if caseExpr.Branches[0].Type.Value != "Int" {
+		t.Fatalf("first branch type not 'Int'. got=%s", caseExpr.Branches[0].Type.Value)
+	}
+
+	if caseExpr.Branches[1].Identifier.Value != "y" {
+		t.Fatalf("second branch identifier not 'y'. got=%s", caseExpr.Branches[1].Identifier.Value)
+	}
+
+	if caseExpr.Branches[1].Type.Value != "String" {
+		t.Fatalf("second branch type not 'String'. got=%s", caseExpr.Branches[1].Type.Value)
 	}
 }

@@ -70,7 +70,7 @@ const (
 )
 
 func (tt TokenType) String() string {
-	return [...]string{"EOF", "ERROR", "CLASS", "INHERITS", "ISVOID", "IF", "ELSE", "FI", "THEN", "LET", "IN", "WHILE", "CASE", "ESCA", "LOOP", "POOL",
+	return [...]string{"EOF", "ERROR", "CLASS", "INHERITS", "ISVOID", "IF", "ELSE", "FI", "THEN", "LET", "IN", "WHILE", "CASE", "ESAC", "LOOP", "POOL",
 		"NEW", "OF", "NOT", "SELF", "SELF_TYPE", "VOID", // Add VOID to string mapping
 		"STR_CONST", "BOOL_CONST", "INT_CONST", "TYPEID", "OBJECTID", "ASSIGN", "DARROW", "LT", "LE", "EQ", "PLUS", "MINUS", "TIMES",
 		"DIVIDE", "LPAREN", "RPAREN", "LBRACE", "RBRACE", "SEMI", "COLON", "COMMA", "DOT", "AT", "NEG"}[tt]
