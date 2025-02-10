@@ -390,6 +390,8 @@ func (l *Lexer) NextToken() Token {
 			tok.Type = NOT
 		case "void":
 			tok.Type = VOID
+		case "self":
+			tok.Type = SELF // Correctly tokenizes "self" as SELF
 		// Handle boolean constants (case-insensitive)
 		case "true", "false":
 			tok.Type = BOOL_CONST

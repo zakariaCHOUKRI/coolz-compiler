@@ -58,6 +58,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.SELF, p.parseSelf)
 	p.registerPrefix(lexer.VOID, p.parseVoidLiteral)
 
+	p.registerPrefix(lexer.LBRACE, p.parseBlockExpression)
+
 	// Register infix parsers with proper precedence
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
 	p.registerInfix(lexer.MINUS, p.parseInfixExpression)
@@ -638,9 +640,7 @@ func (p *Parser) parseDynamicDispatch(left ast.Expression) ast.Expression {
 		return nil
 	}
 
-	p.nextToken() // Consume '('
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
-
 	return exp
 }
 
@@ -675,9 +675,7 @@ func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
 		return nil
 	}
 
-	p.nextToken() // Consume '('
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
-
 	return exp
 }
 
@@ -711,4 +709,30 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	}
 
 	return args
+}
+
+func (p *Parser) parseBlockExpression() ast.Expression {
+	block := &ast.BlockExpression{Token: p.curToken}
+	p.nextToken() // Consume '{'
+
+	var exprs []ast.Expression
+	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		expr := p.parseExpression(LOWEST)
+		if expr == nil {
+			break
+		}
+		exprs = append(exprs, expr)
+
+		// Require semicolon after each expression except the last
+		if !p.peekTokenIs(lexer.RBRACE) && !p.expectPeek(lexer.SEMI) {
+			return nil
+		}
+	}
+
+	if !p.expectPeek(lexer.RBRACE) {
+		return nil
+	}
+
+	block.Expressions = exprs
+	return block
 }
