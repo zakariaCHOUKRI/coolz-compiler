@@ -578,3 +578,74 @@ class Main {
 		t.Fatalf("dispatch argument not 'Hello, World!\n'. got=%s", strArg.Value)
 	}
 }
+
+func TestMethodCallWithMultipleArguments(t *testing.T) {
+	input := `
+class Main {
+    main() : Object {
+        foo(1, "hello", true, 42)
+    };
+};
+`
+
+	l := lexer.NewLexer(strings.NewReader(input))
+	p := New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) > 0 {
+		t.Errorf("parser has %d errors:", len(p.Errors()))
+		for _, err := range p.Errors() {
+			t.Errorf("parser error: %s", err)
+		}
+	}
+
+	if len(program.Classes) != 1 {
+		t.Fatalf("program.Classes does not contain 1 class. got=%d", len(program.Classes))
+	}
+
+	class := program.Classes[0]
+	method, ok := class.Features[0].(*ast.Method)
+	if !ok {
+		t.Fatalf("class.Features[0] is not a method. got=%T", class.Features[0])
+	}
+
+	// The method body should be a dynamic dispatch
+	dispatch, ok := method.Body.(*ast.DynamicDispatch)
+	if !ok {
+		t.Fatalf("method body is not a dynamic dispatch. got=%T", method.Body)
+	}
+
+	// Check method name
+	if dispatch.Method.Value != "foo" {
+		t.Errorf("method name not 'foo'. got=%s", dispatch.Method.Value)
+	}
+
+	// Check number of arguments
+	if len(dispatch.Arguments) != 4 {
+		t.Fatalf("wrong number of arguments. expected=4, got=%d", len(dispatch.Arguments))
+	}
+
+	// Check first argument (integer)
+	intArg, ok := dispatch.Arguments[0].(*ast.IntegerLiteral)
+	if !ok || intArg.Value != 1 {
+		t.Errorf("first argument not int 1. got=%T(%+v)", dispatch.Arguments[0], dispatch.Arguments[0])
+	}
+
+	// Check second argument (string)
+	strArg, ok := dispatch.Arguments[1].(*ast.StringLiteral)
+	if !ok || strArg.Value != "hello" {
+		t.Errorf("second argument not string 'hello'. got=%T(%+v)", dispatch.Arguments[1], dispatch.Arguments[1])
+	}
+
+	// Check third argument (boolean)
+	boolArg, ok := dispatch.Arguments[2].(*ast.BooleanLiteral)
+	if !ok || !boolArg.Value {
+		t.Errorf("third argument not boolean true. got=%T(%+v)", dispatch.Arguments[2], dispatch.Arguments[2])
+	}
+
+	// Check fourth argument (integer)
+	intArg2, ok := dispatch.Arguments[3].(*ast.IntegerLiteral)
+	if !ok || intArg2.Value != 42 {
+		t.Errorf("fourth argument not int 42. got=%T(%+v)", dispatch.Arguments[3], dispatch.Arguments[3])
+	}
+}

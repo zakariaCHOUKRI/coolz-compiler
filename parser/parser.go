@@ -297,7 +297,47 @@ func (p *Parser) parseIdentifier() ast.Expression {
 	} else {
 		exp = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
 	}
-	p.nextToken() // Advance to the next token
+
+	p.nextToken() // Advance past the identifier
+
+	// Check if this is a method call
+	if p.curTokenIs(lexer.LPAREN) {
+		dispatch := &ast.DynamicDispatch{
+			Token:  p.curToken,
+			Object: &ast.Self{Token: lexer.Token{Type: lexer.SELF, Literal: "self"}}, // Implicit self
+			Method: &ast.ObjectIdentifier{Token: exp.(*ast.ObjectIdentifier).Token, Value: exp.(*ast.ObjectIdentifier).Value},
+		}
+
+		p.nextToken() // consume the '('
+
+		// Parse arguments
+		var args []ast.Expression
+
+		if !p.curTokenIs(lexer.RPAREN) {
+			// Parse first argument
+			firstArg := p.parseExpression(LOWEST)
+			if firstArg != nil {
+				args = append(args, firstArg)
+			}
+
+			// Parse remaining arguments
+			for p.curTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				arg := p.parseExpression(LOWEST)
+				if arg != nil {
+					args = append(args, arg)
+				}
+			}
+		}
+
+		if !p.expectCurrent(lexer.RPAREN) {
+			return nil
+		}
+
+		dispatch.Arguments = args
+		return dispatch
+	}
+
 	return exp
 }
 
