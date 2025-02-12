@@ -739,9 +739,11 @@ func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
 		Token:  p.curToken,
 		Object: left,
 	}
-	p.nextToken() // Consume the AT
 
-	// Parse the type identifier (must be TYPEID)
+	// Consume the @ token
+	p.nextToken() // Changed from expectCurrent to nextToken
+
+	// Parse the type identifier
 	if !p.curTokenIs(lexer.TYPEID) {
 		p.errors = append(p.errors, fmt.Sprintf("expected type identifier after '@', got %s", p.curToken.Type))
 		return nil
@@ -753,7 +755,8 @@ func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
 	p.nextToken()
 
 	// Expect and consume DOT after type
-	if !p.expectCurrent(lexer.DOT) {
+	if !p.curTokenIs(lexer.DOT) {
+		p.errors = append(p.errors, fmt.Sprintf("expected '.' after type, got %s", p.curToken.Type))
 		return nil
 	}
 	p.nextToken()
@@ -770,12 +773,42 @@ func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
 	p.nextToken()
 
 	// Parse arguments inside parentheses
-	if !p.expectCurrent(lexer.LPAREN) {
+	if !p.curTokenIs(lexer.LPAREN) {
+		p.errors = append(p.errors, fmt.Sprintf("expected '(' after method name, got %s", p.curToken.Type))
 		return nil
 	}
 
 	// Parse the argument list
-	sd.Arguments = p.parseExpressionList(lexer.RPAREN)
+	var args []ast.Expression
 
+	p.nextToken() // consume (
+
+	// Handle empty argument list
+	if p.curTokenIs(lexer.RPAREN) {
+		p.nextToken() // consume )
+		sd.Arguments = args
+		return sd
+	}
+
+	// Parse first argument
+	exp := p.parseExpression(LOWEST)
+	if exp != nil {
+		args = append(args, exp)
+	}
+
+	// Parse additional arguments
+	for p.curTokenIs(lexer.COMMA) {
+		p.nextToken() // consume comma
+		exp = p.parseExpression(LOWEST)
+		if exp != nil {
+			args = append(args, exp)
+		}
+	}
+
+	if !p.expectCurrent(lexer.RPAREN) {
+		return nil
+	}
+
+	sd.Arguments = args
 	return sd
 }
