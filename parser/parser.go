@@ -651,8 +651,8 @@ func (p *Parser) parseAssignment(left ast.Expression) ast.Expression {
 
 // Add this debugging function
 func (p *Parser) debugToken(prefix string) {
-	fmt.Printf("DEBUG: %s - Current Token: {Type: %v, Literal: %s, Line: %d, Column: %d}\n",
-		prefix, p.curToken.Type, p.curToken.Literal, p.curToken.Line, p.curToken.Column)
+	// fmt.Printf("DEBUG: %s - Current Token: {Type: %v, Literal: %s, Line: %d, Column: %d}\n",
+	// 	prefix, p.curToken.Type, p.curToken.Literal, p.curToken.Line, p.curToken.Column)
 }
 
 func (p *Parser) parseSelf() ast.Expression {
