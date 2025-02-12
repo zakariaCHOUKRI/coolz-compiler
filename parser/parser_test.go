@@ -3,6 +3,7 @@ package parser
 import (
 	"coolz-compiler/ast"
 	"coolz-compiler/lexer"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -647,5 +648,75 @@ class Main {
 	intArg2, ok := dispatch.Arguments[3].(*ast.IntegerLiteral)
 	if !ok || intArg2.Value != 42 {
 		t.Errorf("fourth argument not int 42. got=%T(%+v)", dispatch.Arguments[3], dispatch.Arguments[3])
+	}
+}
+
+func TestPrattParsing(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"class Main { main(): Object { 1 + 2 * 3 }; };",
+			"(1 + (2 * 3))",
+		},
+		{
+			"class Main { main(): Object { 4 * 2 + 3 }; };",
+			"((4 * 2) + 3)",
+		},
+		{
+			"class Main { main(): Object { 1 + 2 + 3 }; };",
+			"((1 + 2) + 3)",
+		},
+		{
+			"class Main { main(): Object { 1 * 2 * 3 }; };",
+			"((1 * 2) * 3)",
+		},
+		{
+			"class Main { main(): Object { 1 + 2 * 3 + 4 }; };",
+			"((1 + (2 * 3)) + 4)",
+		},
+		{
+			"class Main { main(): Object { (1 + 2) * 3 }; };",
+			"((1 + 2) * 3)",
+		},
+	}
+
+	for i, tt := range tests {
+		l := lexer.NewLexer(strings.NewReader(tt.input))
+		p := New(l)
+		program := p.ParseProgram()
+
+		if len(p.Errors()) > 0 {
+			t.Errorf("test[%d] parser has %d errors:", i, len(p.Errors()))
+			for _, err := range p.Errors() {
+				t.Errorf("parser error: %s", err)
+			}
+			continue
+		}
+
+		method := program.Classes[0].Features[0].(*ast.Method)
+		expression := method.Body
+
+		got := inorderTraversal(expression)
+		if got != tt.expected {
+			t.Errorf("test[%d] wrong expression.\nexpected=%q\ngot=%q",
+				i, tt.expected, got)
+		}
+	}
+}
+
+// Helper function to traverse the AST and generate a string representation
+func inorderTraversal(node ast.Expression) string {
+	switch n := node.(type) {
+	case *ast.BinaryExpression:
+		return fmt.Sprintf("(%s %s %s)",
+			inorderTraversal(n.Left),
+			n.Operator,
+			inorderTraversal(n.Right))
+	case *ast.IntegerLiteral:
+		return fmt.Sprintf("%d", n.Value)
+	default:
+		return fmt.Sprintf("unknown(%T)", n)
 	}
 }
