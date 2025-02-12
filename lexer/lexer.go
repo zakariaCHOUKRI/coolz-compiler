@@ -182,7 +182,7 @@ func isIdentifierStart(char rune) bool {
 }
 
 func isIdentifierPart(char rune) bool {
-	return isIdentifierStart(char) || unicode.IsDigit(char)
+	return isIdentifierStart(char) || unicode.IsDigit(char) || char == '_'
 }
 
 func (l *Lexer) readIdentifier() string {
@@ -295,7 +295,6 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = TIMES
 		tok.Literal = "*"
 		l.readChar()
-	// This could be a comment or a subtraction
 	case l.char == '-':
 		tok.Type = MINUS
 		tok.Literal = "-"
@@ -311,6 +310,10 @@ func (l *Lexer) NextToken() Token {
 	case l.char == '.':
 		tok.Type = DOT
 		tok.Literal = "."
+		l.readChar()
+	case l.char == '@':
+		tok.Type = AT
+		tok.Literal = "@"
 		l.readChar()
 	case l.char == '=':
 		if l.peekChar() == '>' {
@@ -390,16 +393,13 @@ func (l *Lexer) NextToken() Token {
 			tok.Type = NOT
 		case "void":
 			tok.Type = VOID
-		case "self":
-			tok.Type = SELF // Correctly tokenizes "self" as SELF
-		// Handle boolean constants (case-insensitive)
 		case "true", "false":
 			tok.Type = BOOL_CONST
 		default:
 			if unicode.IsUpper(rune(identifier[0])) {
 				tok.Type = TYPEID
 			} else {
-				tok.Type = OBJECTID
+				tok.Type = OBJECTID // 'self' falls here
 			}
 		}
 	default:

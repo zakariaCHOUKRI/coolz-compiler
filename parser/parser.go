@@ -773,6 +773,9 @@ func (p *Parser) parseStaticDispatch(left ast.Expression) ast.Expression {
 	if !p.expectCurrent(lexer.LPAREN) {
 		return nil
 	}
+
+	// Parse the argument list
 	sd.Arguments = p.parseExpressionList(lexer.RPAREN)
+
 	return sd
 }
