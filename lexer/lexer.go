@@ -434,6 +434,8 @@ func GetOperatorType(op string) TokenType {
 		return NEG
 	case ".":
 		return DOT
+	case "@":
+		return AT
 	default:
 		return ERROR
 	}
