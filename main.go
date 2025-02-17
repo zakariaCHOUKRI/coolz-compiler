@@ -1,41 +1,66 @@
+// main.go
 package main
 
 import (
+	"coolz-compiler/ast"
+	"coolz-compiler/codegen"
 	"coolz-compiler/lexer"
 	"coolz-compiler/parser"
-	"flag"
 	"fmt"
 	"os"
-	"strings"
+	"os/exec"
 )
 
 func main() {
-
-	inputFilePath := flag.String("i", "", "Path to your program")
-	flag.Parse()
-
-	if *inputFilePath == "" {
-		fmt.Println("Error: Input file path is required.")
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: coolc <input.cl>")
 		os.Exit(1)
 	}
 
-	code, err := os.ReadFile(*inputFilePath)
+	// Read input file
+	file, err := os.Open(os.Args[1])
 	if err != nil {
-		fmt.Printf("Error reading input file: %v\n", err)
-		os.Exit(1)
+		panic(err)
 	}
+	defer file.Close()
 
-	l := lexer.NewLexer(strings.NewReader(string(code)))
+	// Lexing
+	l := lexer.NewLexer(file)
+
+	// Parsing
 	p := parser.New(l)
-	_ = p.ParseProgram()
+	program := p.ParseProgram()
 
+	// Print parser errors
 	if len(p.Errors()) > 0 {
-		fmt.Println("Parsing Errors:")
-		for _, msg := range p.Errors() {
-			fmt.Println(msg)
+		fmt.Println("Parser errors:")
+		for _, err := range p.Errors() {
+			fmt.Println(" ", err)
 		}
 		os.Exit(1)
 	}
 
-	fmt.Println("Done compiling!")
+	// Generate code
+	cg := codegen.NewCodeGenerator()
+	irCode := cg.Generate(program)
+
+	// Write LLVM IR to file
+	outputFile := "output.ll"
+	if err := os.WriteFile(outputFile, []byte(irCode), 0644); err != nil {
+		panic(err)
+	}
+
+	// Compile with clang
+	cmd := exec.Command("clang", "-Wno-override-module", "-o", "a.out", outputFile)
+	if err := cmd.Run(); err != nil {
+		fmt.Println("Linking failed:", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Compilation successful. Output: a.out")
 }
+
+// Dummy semantic analyzer to satisfy compiler steps
+type dummySemanticAnalyzer struct{}
+
+func (d *dummySemanticAnalyzer) Analyze(*ast.Program) {}

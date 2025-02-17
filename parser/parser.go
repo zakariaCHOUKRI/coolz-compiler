@@ -700,17 +700,17 @@ func (p *Parser) parseBlockExpression() ast.Expression {
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
 		expr := p.parseExpression(LOWEST)
 		if expr == nil {
-			break
+			return nil
 		}
 		exprs = append(exprs, expr)
 
-		// Require semicolon after each expression except the last
-		if !p.peekTokenIs(lexer.RBRACE) && !p.expectPeek(lexer.SEMI) {
+		// Consume the semicolon
+		if !p.expectCurrent(lexer.SEMI) {
 			return nil
 		}
 	}
 
-	if !p.expectPeek(lexer.RBRACE) {
+	if !p.expectCurrent(lexer.RBRACE) {
 		return nil
 	}
 

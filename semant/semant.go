@@ -57,9 +57,52 @@ func (sa *SemanticAnalyser) Errors() []string {
 }
 
 func (sa *SemanticAnalyser) Analyze(program *ast.Program) {
+	fmt.Println("Starting semantic analysis...")
+	fmt.Printf("Number of classes: %d\n", len(program.Classes))
 	sa.buildClassesSymboltables(program)
+	fmt.Printf("Built class symbol tables. Errors so far: %d\n", len(sa.errors))
 	sa.buildSymboltables(program)
+	fmt.Printf("Built all symbol tables. Errors so far: %d\n", len(sa.errors))
 	sa.typeCheck(program)
+	fmt.Printf("Completed type checking. Errors so far: %d\n", len(sa.errors))
+	sa.checkMainClass()
+	fmt.Printf("Final error count: %d\n", len(sa.errors))
+
+	foundMain := false
+	for _, class := range program.Classes {
+		if class.Name.Value == "Main" {
+			foundMain = true
+			break
+		}
+	}
+	if foundMain {
+		sa.checkMainClass() // Only check if Main exists
+	}
+}
+
+func (sa *SemanticAnalyser) checkMainClass() {
+	mainEntry, ok := sa.globalSymbolTable.Lookup("Main")
+	if !ok {
+		sa.errors = append(sa.errors, "Main class not defined")
+		return
+	}
+	methodEntry, ok := mainEntry.Scope.Lookup("main")
+	if !ok {
+		sa.errors = append(sa.errors, "Main class must have method main() : Object")
+		return
+	}
+	method := methodEntry.Method
+	if len(method.Formals) != 0 {
+		sa.errors = append(sa.errors, "Main class main method must have no parameters")
+	}
+	// Ensure return type is Object or SELF_TYPE
+	expectedType := method.Type.Value
+	if expectedType == "SELF_TYPE" {
+		expectedType = "Main"
+	}
+	if expectedType != "Object" {
+		sa.errors = append(sa.errors, "Main class main method must return Object")
+	}
 }
 
 func (sa *SemanticAnalyser) typeCheck(program *ast.Program) {
@@ -70,14 +113,17 @@ func (sa *SemanticAnalyser) typeCheck(program *ast.Program) {
 }
 
 func (sa *SemanticAnalyser) typeCheckClass(cls *ast.Class, st *SymbolTable) {
+	fmt.Printf("Type checking class: %s\n", cls.Name.Value)
 	sa.currentClass = cls.Name.Value
 	defer func() { sa.currentClass = "" }()
 
 	for _, feature := range cls.Features {
 		switch f := feature.(type) {
 		case *ast.Attribute:
+			fmt.Printf("Checking attribute: %s\n", f.Name.Value)
 			sa.typeCheckAttribute(f, st)
 		case *ast.Method:
+			fmt.Printf("Checking method: %s\n", f.Name.Value)
 			sa.typeCheckMethod(f, st)
 		}
 	}
@@ -111,6 +157,34 @@ func (sa *SemanticAnalyser) typeCheckMethod(method *ast.Method, st *SymbolTable)
 		sa.errors = append(sa.errors, fmt.Sprintf("method %s expects return type %s, got %s",
 			method.Name.Value, expectedType, exprType))
 	}
+
+	// Check method override
+	currentClassEntry, _ := sa.globalSymbolTable.Lookup(sa.currentClass)
+	parentClass := currentClassEntry.Parent
+	for parentClass != "" {
+		parentEntry, ok := sa.globalSymbolTable.Lookup(parentClass)
+		if !ok {
+			break
+		}
+		parentMethodEntry, ok := parentEntry.Scope.Lookup(method.Name.Value)
+		if ok && parentMethodEntry.Method != nil {
+			parentMethod := parentMethodEntry.Method
+			if len(method.Formals) != len(parentMethod.Formals) {
+				sa.errors = append(sa.errors, fmt.Sprintf("method %s has different number of parameters", method.Name.Value))
+			} else {
+				for i, f := range method.Formals {
+					if f.Type.Value != parentMethod.Formals[i].Type.Value {
+						sa.errors = append(sa.errors, fmt.Sprintf("method %s parameter %d type mismatch", method.Name.Value, i+1))
+					}
+				}
+			}
+			if method.Type.Value != parentMethod.Type.Value {
+				sa.errors = append(sa.errors, fmt.Sprintf("method %s has incompatible return type", method.Name.Value))
+			}
+			break
+		}
+		parentClass = parentEntry.Parent
+	}
 }
 
 func (sa *SemanticAnalyser) isTypeConformant(subType, superType string) bool {
@@ -131,17 +205,23 @@ func (sa *SemanticAnalyser) isTypeConformant(subType, superType string) bool {
 		if current == superType {
 			return true
 		}
-		entry, ok = sa.globalSymbolTable.Lookup(current)
+		parentEntry, ok := sa.globalSymbolTable.Lookup(current)
 		if !ok {
 			break
 		}
-		current = entry.Parent
+		current = parentEntry.Parent
 	}
 
 	return false
 }
 
 func (sa *SemanticAnalyser) getExpressionType(expr ast.Expression, st *SymbolTable) string {
+	if expr == nil {
+		fmt.Println("Warning: nil expression in getExpressionType")
+		return "Object"
+	}
+	typ := fmt.Sprintf("%T", expr)
+	fmt.Printf("Getting type for expression: %s\n", typ)
 	switch e := expr.(type) {
 	case *ast.IntegerLiteral:
 		return "Int"
@@ -173,9 +253,51 @@ func (sa *SemanticAnalyser) getExpressionType(expr ast.Expression, st *SymbolTab
 		return sa.getObjectIdentifierType(e, st)
 	case *ast.Self:
 		return "SELF_TYPE"
+	case *ast.StaticDispatch:
+		return sa.handleStaticDispatch(e, st)
 	default:
 		return "Object"
 	}
+}
+
+func (sa *SemanticAnalyser) handleStaticDispatch(sd *ast.StaticDispatch, st *SymbolTable) string {
+	exprType := sa.getExpressionType(sd.Object, st) // Use sd.Object instead of sd.Expr
+	staticType := sd.Type.Value
+
+	if !sa.isTypeConformant(exprType, staticType) {
+		sa.errors = append(sa.errors, fmt.Sprintf("type %s does not conform to %s", exprType, staticType))
+	}
+
+	// Check method exists in staticType
+	entry, ok := sa.globalSymbolTable.Lookup(staticType)
+	if !ok {
+		sa.errors = append(sa.errors, fmt.Sprintf("undefined type %s", staticType))
+		return "Object"
+	}
+	methodEntry, ok := entry.Scope.Lookup(sd.Method.Value)
+	if !ok {
+		sa.errors = append(sa.errors, fmt.Sprintf("method %s not defined in type %s", sd.Method.Value, staticType))
+		return "Object"
+	}
+
+	// Check parameters
+	if len(sd.Arguments) != len(methodEntry.Method.Formals) { // Use sd.Arguments instead of sd.Args
+		sa.errors = append(sa.errors, fmt.Sprintf("method %s expects %d parameters, got %d", sd.Method.Value, len(methodEntry.Method.Formals), len(sd.Arguments)))
+	} else {
+		for i, arg := range sd.Arguments { // Use sd.Arguments instead of sd.Args
+			argType := sa.getExpressionType(arg, st)
+			formalType := methodEntry.Method.Formals[i].Type.Value
+			if !sa.isTypeConformant(argType, formalType) {
+				sa.errors = append(sa.errors, fmt.Sprintf("argument %d type %s does not conform to %s", i+1, argType, formalType))
+			}
+		}
+	}
+
+	// Return type handling
+	if methodEntry.Type == "SELF_TYPE" {
+		return staticType
+	}
+	return methodEntry.Type
 }
 
 func (sa *SemanticAnalyser) getObjectIdentifierType(oi *ast.ObjectIdentifier, st *SymbolTable) string {
@@ -188,13 +310,21 @@ func (sa *SemanticAnalyser) getObjectIdentifierType(oi *ast.ObjectIdentifier, st
 }
 
 func (sa *SemanticAnalyser) buildClassesSymboltables(program *ast.Program) {
+	fmt.Println("Building class symbol tables...")
 	// Predefine basic classes
-	sa.globalSymbolTable.AddEntry("Object", &SymbolEntry{Type: "Class", Parent: ""})
-	sa.globalSymbolTable.AddEntry("Int", &SymbolEntry{Type: "Class", Parent: "Object"})
-	sa.globalSymbolTable.AddEntry("String", &SymbolEntry{Type: "Class", Parent: "Object"})
-	sa.globalSymbolTable.AddEntry("Bool", &SymbolEntry{Type: "Class", Parent: "Object"})
+	sa.globalSymbolTable.AddEntry("Object", &SymbolEntry{Type: "Class", Parent: "", Scope: NewSymbolTable(nil)})
+	sa.globalSymbolTable.AddEntry("Int", &SymbolEntry{Type: "Class", Parent: "Object", Scope: NewSymbolTable(sa.globalSymbolTable)})
+	sa.globalSymbolTable.AddEntry("String", &SymbolEntry{Type: "Class", Parent: "Object", Scope: NewSymbolTable(sa.globalSymbolTable)})
+	sa.globalSymbolTable.AddEntry("Bool", &SymbolEntry{Type: "Class", Parent: "Object", Scope: NewSymbolTable(sa.globalSymbolTable)})
+
+	// Initialize scopes for basic classes
+	for _, name := range []string{"Object", "Int", "String", "Bool"} {
+		entry, _ := sa.globalSymbolTable.Lookup(name)
+		entry.Scope = NewSymbolTable(sa.globalSymbolTable)
+	}
 
 	for _, class := range program.Classes {
+		fmt.Printf("Processing class: %s\n", class.Name.Value)
 		if _, ok := sa.globalSymbolTable.Lookup(class.Name.Value); ok {
 			sa.errors = append(sa.errors, fmt.Sprintf("class %s redefined", class.Name.Value))
 			continue
@@ -207,6 +337,33 @@ func (sa *SemanticAnalyser) buildClassesSymboltables(program *ast.Program) {
 			parent = ""
 		}
 
+		// Check if parent exists
+		if parent != "" {
+			if _, ok := sa.globalSymbolTable.Lookup(parent); !ok {
+				sa.errors = append(sa.errors, fmt.Sprintf("class %s is not defined", parent))
+			}
+		}
+
+		// Check for cyclic inheritance
+		currentClass := class.Name.Value
+		currentParent := parent
+		visited := map[string]bool{}
+		for currentParent != "" {
+			if currentParent == currentClass {
+				sa.errors = append(sa.errors, "cyclic inheritance detected")
+				break
+			}
+			if visited[currentParent] {
+				break // Prevent infinite loops
+			}
+			visited[currentParent] = true
+			entry, ok := sa.globalSymbolTable.Lookup(currentParent)
+			if !ok {
+				break
+			}
+			currentParent = entry.Parent
+		}
+
 		sa.globalSymbolTable.AddEntry(class.Name.Value, &SymbolEntry{
 			Type:   "Class",
 			Token:  class.Name.Token,
@@ -217,13 +374,24 @@ func (sa *SemanticAnalyser) buildClassesSymboltables(program *ast.Program) {
 
 func (sa *SemanticAnalyser) buildSymboltables(program *ast.Program) {
 	for _, class := range program.Classes {
-		classEntry, _ := sa.globalSymbolTable.Lookup(class.Name.Value)
+		// classEntry, _ := sa.globalSymbolTable.Lookup(class.Name.Value)
+		classEntry, ok := sa.globalSymbolTable.Lookup(class.Name.Value)
+		if !ok {
+			// Class was not added (e.g., due to redefinition), skip
+			continue
+		}
 		classEntry.Scope = NewSymbolTable(sa.globalSymbolTable)
 
 		// Add attributes and methods
 		for _, feature := range class.Features {
 			switch f := feature.(type) {
 			case *ast.Attribute:
+				// Check attribute type
+				if f.Type.Value != "SELF_TYPE" {
+					if _, ok := sa.globalSymbolTable.Lookup(f.Type.Value); !ok {
+						sa.errors = append(sa.errors, fmt.Sprintf("undefined type %s", f.Type.Value))
+					}
+				}
 				if _, ok := classEntry.Scope.Lookup(f.Name.Value); ok {
 					sa.errors = append(sa.errors, fmt.Sprintf("attribute %s redefined", f.Name.Value))
 					continue
@@ -235,6 +403,24 @@ func (sa *SemanticAnalyser) buildSymboltables(program *ast.Program) {
 				})
 
 			case *ast.Method:
+				// Check return type
+				if f.Type.Value != "SELF_TYPE" {
+					if _, ok := sa.globalSymbolTable.Lookup(f.Type.Value); !ok {
+						sa.errors = append(sa.errors, fmt.Sprintf("undefined type %s", f.Type.Value))
+					}
+				}
+				// Check formals
+				seenFormals := make(map[string]bool)
+				for _, formal := range f.Formals {
+					if seenFormals[formal.Name.Value] {
+						sa.errors = append(sa.errors, fmt.Sprintf("duplicate parameter %s", formal.Name.Value))
+					}
+					seenFormals[formal.Name.Value] = true
+					// Check formal type
+					if _, ok := sa.globalSymbolTable.Lookup(formal.Type.Value); !ok {
+						sa.errors = append(sa.errors, fmt.Sprintf("undefined type %s", formal.Type.Value))
+					}
+				}
 				methodSt := NewSymbolTable(classEntry.Scope)
 				// Add formals to method's scope
 				for _, formal := range f.Formals {
@@ -274,6 +460,11 @@ func (sa *SemanticAnalyser) GetAssignmentExpressionType(a *ast.Assignment, st *S
 	left, ok := a.Left.(*ast.ObjectIdentifier)
 	if !ok {
 		sa.errors = append(sa.errors, "assignment to non-identifier")
+		return "Object"
+	}
+
+	if left.Value == "self" {
+		sa.errors = append(sa.errors, "cannot assign to self")
 		return "Object"
 	}
 

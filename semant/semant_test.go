@@ -1,17 +1,18 @@
 package semant
 
 import (
+	"coolz-compiler/ast"
 	"coolz-compiler/lexer"
 	"coolz-compiler/parser"
+	"fmt"
 	"strings"
 	"testing"
 )
 
-func parseProgram(input string) *parser.Parser {
+func parseProgram(input string) *ast.Program {
 	l := lexer.NewLexer(strings.NewReader(input))
 	p := parser.New(l)
-	p.ParseProgram() // Ignore parse errors for test setup
-	return p
+	return p.ParseProgram() // Return the parsed program
 }
 
 func TestSemanticAnalysis(t *testing.T) {
@@ -206,9 +207,26 @@ func TestSemanticAnalysis(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parseProgram(tt.program)
+			fmt.Printf("\n=== Running test: %s ===\n", tt.name)
+			fmt.Printf("Input program:\n%s\n", tt.program)
+
+			program := parseProgram(tt.program)
+			if program == nil {
+				t.Fatal("Failed to parse program")
+			}
+			fmt.Printf("Successfully parsed program with %d classes\n", len(program.Classes))
+
 			sa := NewSemanticAnalyser()
-			sa.Analyze(p.ParseProgram())
+			sa.Analyze(program)
+
+			fmt.Printf("\nActual errors (%d):\n", len(sa.errors))
+			for _, err := range sa.errors {
+				fmt.Printf("  - %s\n", err)
+			}
+			fmt.Printf("Expected errors (%d):\n", len(tt.expected))
+			for _, err := range tt.expected {
+				fmt.Printf("  - %s\n", err)
+			}
 
 			// Check expected errors
 			if len(sa.errors) != len(tt.expected) {
@@ -281,15 +299,23 @@ func TestPositiveCases(t *testing.T) {
 
 	for _, tt := range validPrograms {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parseProgram(tt.program)
+			fmt.Printf("\n=== Running positive test: %s ===\n", tt.name)
+			fmt.Printf("Input program:\n%s\n", tt.program)
+
+			program := parseProgram(tt.program)
+			if program == nil {
+				t.Fatal("Failed to parse program")
+			}
+
 			sa := NewSemanticAnalyser()
-			sa.Analyze(p.ParseProgram())
+			sa.Analyze(program)
 
 			if len(sa.errors) > 0 {
-				t.Errorf("Expected no errors, got %d:", len(sa.errors))
+				fmt.Printf("\nUnexpected errors in positive test case:\n")
 				for _, err := range sa.errors {
-					t.Errorf("  %s", err)
+					fmt.Printf("  - %s\n", err)
 				}
+				t.Errorf("Expected no errors, got %d errors", len(sa.errors))
 			}
 		})
 	}
