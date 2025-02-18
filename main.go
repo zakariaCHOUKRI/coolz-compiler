@@ -47,25 +47,27 @@ func main() {
 	}
 
 	// Generate code
-	cg := codegen.NewCodeGenerator()
-	irCode := cg.Generate(program)
+	cg := codegen.NewCodeGen()
+	irString := cg.GenerateIR(program)
 
 	// Use outputName for both the executable and intermediate file
 	llvmIR := filepath.Join(filepath.Dir(*outputName), "output.ll")
-	if err := os.WriteFile(llvmIR, []byte(irCode), 0644); err != nil {
+	if err := os.WriteFile(llvmIR, []byte(irString), 0644); err != nil {
 		panic(err)
 	}
 
 	// Compile with MSYS2 Clang using specified output name
-	cmd := exec.Command("clang",
+	cmd := exec.Command("clang-cl",
 		llvmIR,
-		"-o", *outputName,
-		"-fuse-ld=lld",
-		"-Wl,/subsystem:console",
-		"-ladvapi32",
-		"-lshell32",
-		"-luser32",
-		"-lkernel32",
+		//"-v",
+		"/Fe:"+*outputName,
+		"/link",
+		"/subsystem:console",
+		"advapi32.lib",
+		"shell32.lib",
+		"user32.lib",
+		"kernel32.lib",
+		"msvcrt.lib",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
