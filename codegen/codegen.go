@@ -1,203 +1,163 @@
-// codegen/codegen.go
 package codegen
 
 import (
+	"bytes"
 	"coolz-compiler/ast"
-
-	"github.com/llir/llvm/ir"
-	"github.com/llir/llvm/ir/constant"
-	"github.com/llir/llvm/ir/types"
+	"fmt"
+	"strings"
 )
 
 type CodeGenerator struct {
-	module *ir.Module
-
-	// Runtime functions
-	printf *ir.Func
-	scanf  *ir.Func
-	malloc *ir.Func
-	free   *ir.Func
-	gets   *ir.Func
-	atoi   *ir.Func
+	buf     bytes.Buffer
+	strings map[string]string // Tracks string literals and their global names
+	formats map[string]string // Tracks printf format strings
 }
 
 func NewCodeGenerator() *CodeGenerator {
-	cg := &CodeGenerator{
-		module: ir.NewModule(),
+	return &CodeGenerator{
+		strings: make(map[string]string),
+		formats: make(map[string]string),
 	}
-
-	// Declare external functions
-	cg.printf = cg.declarePrintf()
-	cg.scanf = cg.declareScanf()
-	cg.malloc = cg.declareMalloc()
-	cg.free = cg.declareFree()
-	cg.gets = cg.declareGets()
-	cg.atoi = cg.declareAtoi()
-
-	return cg
 }
 
 func (cg *CodeGenerator) Generate(program *ast.Program) string {
-	// Generate IO class methods
-	cg.generateIOClass()
+	cg.buf.Reset()
+	cg.emitHeader()
 
-	// Generate Main class
-	mainClass := cg.findMainClass(program)
-	if mainClass != nil {
-		cg.generateMainClass(mainClass)
-	}
-
-	return cg.module.String()
-}
-
-func (cg *CodeGenerator) generateIOClass() {
-	// Generate IO class methods
-	cg.generateOutString()
-	cg.generateOutInt()
-	cg.generateInString()
-	cg.generateInInt()
-}
-
-func (cg *CodeGenerator) generateOutString() {
-	fn := cg.module.NewFunc("IO_out_string",
-		types.I8Ptr, // return type (SELF_TYPE as i8*)
-		ir.NewParam("self", types.I8Ptr),
-		ir.NewParam("str", types.I8Ptr),
-	)
-
-	block := fn.NewBlock("entry")
-
-	// printf format string
-	fmtStr := block.NewAlloca(types.I8)
-	block.NewStore(constant.NewCharArrayFromString("%s\000"), fmtStr)
-
-	// Call printf
-	block.NewCall(cg.printf, fmtStr, fn.Params[1])
-
-	// Return self
-	block.NewRet(fn.Params[0])
-}
-
-func (cg *CodeGenerator) generateOutInt() {
-	fn := cg.module.NewFunc("IO_out_int",
-		types.I8Ptr,
-		ir.NewParam("self", types.I8Ptr),
-		ir.NewParam("num", types.I32),
-	)
-
-	block := fn.NewBlock("entry")
-
-	fmtStr := block.NewAlloca(types.I8)
-	block.NewStore(constant.NewCharArrayFromString("%d\000"), fmtStr)
-
-	block.NewCall(cg.printf, fmtStr, fn.Params[1])
-	block.NewRet(fn.Params[0])
-}
-
-func (cg *CodeGenerator) generateInString() {
-	fn := cg.module.NewFunc("IO_in_string",
-		types.I8Ptr,
-		ir.NewParam("self", types.I8Ptr),
-	)
-
-	block := fn.NewBlock("entry")
-
-	// Allocate buffer
-	buf := block.NewCall(cg.malloc, constant.NewInt(types.I64, 256))
-	bufPtr := block.NewBitCast(buf, types.I8Ptr)
-
-	// Call gets
-	block.NewCall(cg.gets, bufPtr)
-
-	// Return buffer
-	block.NewRet(bufPtr)
-}
-
-func (cg *CodeGenerator) generateInInt() {
-	fn := cg.module.NewFunc("IO_in_int",
-		types.I32,
-		ir.NewParam("self", types.I8Ptr),
-	)
-
-	block := fn.NewBlock("entry")
-
-	// Allocate buffer
-	buf := block.NewCall(cg.malloc, constant.NewInt(types.I64, 256))
-	bufPtr := block.NewBitCast(buf, types.I8Ptr)
-
-	// Call gets
-	block.NewCall(cg.gets, bufPtr)
-
-	// Convert to int
-	result := block.NewCall(cg.atoi, bufPtr)
-
-	// Free buffer
-	block.NewCall(cg.free, buf)
-
-	block.NewRet(result)
-}
-
-// Helper functions to declare C stdlib functions
-func (cg *CodeGenerator) declarePrintf() *ir.Func {
-	printfType := types.NewFunc(types.I32, types.I8Ptr)
-	printfType.Variadic = true
-	return cg.module.NewFunc("printf", printfType)
-}
-
-func (cg *CodeGenerator) declareScanf() *ir.Func {
-	scanfType := types.NewFunc(types.I32, types.I8Ptr)
-	scanfType.Variadic = true
-	return cg.module.NewFunc("scanf", scanfType)
-}
-
-func (cg *CodeGenerator) declareMalloc() *ir.Func {
-	return cg.module.NewFunc("malloc",
-		types.I8Ptr,
-		ir.NewParam("size", types.I64),
-	)
-}
-
-func (cg *CodeGenerator) declareFree() *ir.Func {
-	return cg.module.NewFunc("free",
-		types.Void,
-		ir.NewParam("ptr", types.I8Ptr),
-	)
-}
-
-func (cg *CodeGenerator) declareGets() *ir.Func {
-	return cg.module.NewFunc("gets",
-		types.I8Ptr,
-		ir.NewParam("str", types.I8Ptr),
-	)
-}
-
-func (cg *CodeGenerator) declareAtoi() *ir.Func {
-	return cg.module.NewFunc("atoi",
-		types.I32,
-		ir.NewParam("str", types.I8Ptr),
-	)
-}
-
-func (cg *CodeGenerator) findMainClass(program *ast.Program) *ast.Class {
+	// Generate code for classes first
 	for _, class := range program.Classes {
-		if class.Name.Value == "Main" {
-			return class
-		}
+		cg.genClass(class)
 	}
-	return nil
+
+	// Emit global strings afterward
+	for value, name := range cg.strings {
+		cg.emitGlobalString(name, value)
+	}
+	// Handle format strings separately
+	for format, name := range cg.formats {
+		// For format strings, we need to account for the format specifier
+		cg.emit("%s = private unnamed_addr constant [4 x i8] c\"%s\\00\\00\"\n", name, format)
+	}
+
+	cg.emitMainFunction()
+	return cg.buf.String()
 }
 
-func (cg *CodeGenerator) generateMainClass(mainClass *ast.Class) {
-	mainFn := cg.module.NewFunc("main", types.I32)
-	block := mainFn.NewBlock("entry")
+func (cg *CodeGenerator) emitHeader() {
+	cg.emit("declare i32 @printf(i8*, ...)\n\n")
+}
 
-	// Locate "Main_main" function by name
-	for _, fn := range cg.module.Funcs {
-		if fn.Name() == "Main_main" {
-			block.NewCall(fn)
-			break
+func (cg *CodeGenerator) genClass(class *ast.Class) {
+	for _, feature := range class.Features {
+		switch f := feature.(type) {
+		case *ast.Method:
+			cg.genMethod(class.Name.Value, f)
 		}
 	}
+}
 
-	block.NewRet(constant.NewInt(types.I32, 0))
+func (cg *CodeGenerator) genMethod(className string, method *ast.Method) {
+	funcName := fmt.Sprintf("%s_%s", className, method.Name.Value)
+	cg.emit("define i8* @%s(i8* %%self) {\n", funcName)
+	cg.genExpression(method.Body)
+	cg.emit("ret i8* %%self\n}\n\n")
+}
+
+func (cg *CodeGenerator) genExpression(expr ast.Expression) {
+	switch e := expr.(type) {
+	case *ast.BlockExpression:
+		for _, exp := range e.Expressions {
+			cg.genExpression(exp)
+		}
+	case *ast.DynamicDispatch:
+		cg.genDynamicDispatch(e)
+	case *ast.StringLiteral:
+		// String literals are handled during their usage in dispatch
+	case *ast.IntegerLiteral:
+		// Integer literals are handled during their usage in dispatch
+	default:
+		// Handle other expressions as needed
+	}
+}
+
+func (cg *CodeGenerator) genDynamicDispatch(d *ast.DynamicDispatch) {
+	methodName := d.Method.Value
+	switch methodName {
+	case "out_string":
+		cg.genOutString(d)
+	case "out_int":
+		cg.genOutInt(d)
+	// Add cases for in_string, in_int, etc. as needed
+	default:
+		// Handle other methods
+	}
+}
+
+func (cg *CodeGenerator) genOutString(d *ast.DynamicDispatch) {
+	if len(d.Arguments) != 1 {
+		panic("out_string requires exactly one argument")
+	}
+
+	strLit, ok := d.Arguments[0].(*ast.StringLiteral)
+	if !ok {
+		panic("out_string argument must be a string literal")
+	}
+
+	// Generate string constant and format
+	strName := cg.genStringConstant(strLit.Value)
+	formatName := cg.genFormatString("%s")
+
+	cg.emit("  %%1 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* %s, i32 0, i32 0), i8* getelementptr inbounds ([%d x i8], [%d x i8]* %s, i32 0, i32 0))\n",
+		formatName, len(strLit.Value)+1, len(strLit.Value)+1, strName)
+}
+
+func (cg *CodeGenerator) genOutInt(d *ast.DynamicDispatch) {
+	if len(d.Arguments) != 1 {
+		panic("out_int requires exactly one argument")
+	}
+
+	intLit, ok := d.Arguments[0].(*ast.IntegerLiteral)
+	if !ok {
+		panic("out_int argument must be an integer literal")
+	}
+
+	formatName := cg.genFormatString("%d")
+	cg.emit("  %%1 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* %s, i32 0, i32 0), i32 %d)\n",
+		formatName, intLit.Value)
+}
+
+func (cg *CodeGenerator) genStringConstant(value string) string {
+	if name, exists := cg.strings[value]; exists {
+		return name
+	}
+	name := fmt.Sprintf("@.str.%d", len(cg.strings))
+	cg.strings[value] = name
+	return name
+}
+
+func (cg *CodeGenerator) genFormatString(format string) string {
+	if name, exists := cg.formats[format]; exists {
+		return name
+	}
+	safeFormat := strings.ReplaceAll(format, "%", "p")
+	name := fmt.Sprintf("@.fmt.%s", safeFormat)
+	cg.formats[format] = name
+	return name
+}
+
+func (cg *CodeGenerator) emitGlobalString(name, value string) {
+	escaped := strings.ReplaceAll(value, "\n", "\\0A")
+	escaped = strings.ReplaceAll(escaped, "\"", "\\22")
+	actualLength := len(value) + 1 // Original string length + null terminator
+	cg.emit("%s = private unnamed_addr constant [%d x i8] c\"%s\\00\"\n", name, actualLength, escaped)
+}
+
+func (cg *CodeGenerator) emitMainFunction() {
+	cg.emit("define i32 @main() {\n")
+	cg.emit("  %%1 = call i8* @Main_main(i8* null)\n")
+	cg.emit("  ret i32 0\n}\n")
+}
+
+func (cg *CodeGenerator) emit(format string, args ...interface{}) {
+	cg.buf.WriteString(fmt.Sprintf(format, args...))
 }
