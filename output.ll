@@ -5,9 +5,7 @@ target triple = "x86_64-pc-windows-msvc"
 @str.2 = global [9 x i8] c"%255[^\0A]\00"
 @str.3 = global [4 x i8] c"%*c\00"
 @str.4 = global [10 x i8] c"%*[^\0A]%*c\00"
-@str.5 = global [17 x i8] c"Enter a string: \00"
-@str.6 = global [2 x i8] c"\0A\00"
-@str.7 = global [17 x i8] c"Enter a number: \00"
+@str.5 = global [2 x i8] c"\0A\00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -59,14 +57,12 @@ define i64 @IO_in_int(i8* %self) {
 
 define i8* @Main_main(i8* %self) {
 0:
-	call void @IO_out_string(i8* null, i8* getelementptr ([17 x i8], [17 x i8]* @str.5, i32 0, i32 0))
-	%1 = call i8* @IO_in_string(i8* null)
-	call void @IO_out_string(i8* null, i8* %1)
-	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.6, i32 0, i32 0))
-	call void @IO_out_string(i8* null, i8* getelementptr ([17 x i8], [17 x i8]* @str.7, i32 0, i32 0))
-	%2 = call i64 @IO_in_int(i8* null)
-	call void @IO_out_int(i8* null, i64 %2)
-	call void @IO_out_string(i8* null, [2 x i8]* @str.6)
+	%1 = alloca i8*
+	%2 = call i8* @IO_in_string(i8* null)
+	store i8* %2, i8** %1
+	%3 = load i8*, i8** %1
+	call void @IO_out_string(i8* null, i8* %3)
+	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.5, i32 0, i32 0))
 	ret i8* null
 }
 

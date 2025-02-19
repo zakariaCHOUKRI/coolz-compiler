@@ -19,6 +19,7 @@ type CodeGenerator struct {
 	scanf           *ir.Func
 	methods         map[string]map[string]*ir.Func
 	memset          *ir.Func
+	currentBindings map[string]value.Value
 }
 
 // New creates a new code generator
@@ -27,6 +28,7 @@ func New() *CodeGenerator {
 		module:          ir.NewModule(),
 		stringConstants: make(map[string]*ir.Global),
 		methods:         make(map[string]map[string]*ir.Func),
+		currentBindings: make(map[string]value.Value),
 	}
 
 	// Set target triple for Windows MSVC
@@ -257,9 +259,69 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		return cg.generateDispatch(block, e)
 	case *ast.BlockExpression:
 		return cg.generateBlock(block, e)
+	case *ast.LetExpression:
+		return cg.generateLet(block, e)
+	case *ast.ObjectIdentifier:
+		// Look up the variable in current bindings
+		if alloca, ok := cg.currentBindings[e.Value]; ok {
+			// Load the value from the alloca instruction
+			return block.NewLoad(alloca.Type().(*types.PointerType).ElemType, alloca), nil
+		}
+		return nil, fmt.Errorf("undefined variable: %s", e.Value)
 	default:
 		return nil, fmt.Errorf("unsupported expression type: %T", expr)
 	}
+}
+
+// generateLet generates code for a let expression
+func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression) (value.Value, error) {
+	// Create new allocas for all bindings
+	bindings := make(map[string]value.Value)
+
+	// Process each binding
+	for _, binding := range letExpr.Bindings {
+		// Allocate space for the variable
+		varType := cg.getLLVMType(binding.Type)
+		alloca := block.NewAlloca(varType)
+
+		// If there's an initialization expression, evaluate it and store
+		if binding.Init != nil {
+			initValue, err := cg.generateExpression(block, binding.Init)
+			if err != nil {
+				return nil, err
+			}
+			block.NewStore(initValue, alloca)
+		} else {
+			// Initialize with default value
+			var defaultValue value.Value
+			switch binding.Type.Value {
+			case "Int":
+				defaultValue = constant.NewInt(types.I64, 0)
+			case "Bool":
+				defaultValue = constant.NewBool(false)
+			case "String":
+				defaultValue = constant.NewNull(types.NewPointer(types.I8))
+			default:
+				defaultValue = constant.NewNull(types.NewPointer(types.I8))
+			}
+			block.NewStore(defaultValue, alloca)
+		}
+
+		// Store the allocation in our bindings map
+		bindings[binding.Identifier.Value] = alloca
+	}
+
+	// Store the previous bindings map to restore later if needed
+	prevBindings := cg.currentBindings
+	cg.currentBindings = bindings
+
+	// Generate code for the body expression
+	result, err := cg.generateExpression(block, letExpr.In)
+
+	// Restore previous bindings
+	cg.currentBindings = prevBindings
+
+	return result, err
 }
 
 // generateBlock generates code for a block expression

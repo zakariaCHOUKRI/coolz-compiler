@@ -1,5 +1,6 @@
-class Main {
-    main() : Int {
-        42;
-    };
-};
+(* hello-world.cl *) 
+class Main inherits IO { 
+    main() : Object { 
+        out_string("Hello, world.\n") 
+    } ; 
+} ; 
