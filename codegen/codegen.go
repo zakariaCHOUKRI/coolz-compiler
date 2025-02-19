@@ -57,8 +57,8 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Call printf with the string
 	block.NewCall(cg.printf, strFormat, outString.Params[1])
 	// Print newline
-	newlineFormat := cg.getStringConstant("\n")
-	block.NewCall(cg.printf, newlineFormat)
+	// newlineFormat := cg.getStringConstant("\n")
+	// block.NewCall(cg.printf, newlineFormat)
 	block.NewRet(nil)
 
 	// Create out_int method
@@ -75,7 +75,7 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Call printf with the integer
 	block.NewCall(cg.printf, intFormat, outInt.Params[1])
 	// Print newline
-	block.NewCall(cg.printf, newlineFormat)
+	// block.NewCall(cg.printf, newlineFormat)
 	block.NewRet(nil)
 
 	// Generate code for all classes
