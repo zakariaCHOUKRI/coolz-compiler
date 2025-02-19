@@ -66,8 +66,12 @@ func main() {
 		llvmIR,
 		//"-v",
 		"/Fe:"+*outputName,
+		"/MD", // Add this line to use dynamic CRT
 		"/link",
 		"/subsystem:console",
+		"libucrt.lib",                  // Add this line
+		"libcmt.lib",                   // Add this line
+		"legacy_stdio_definitions.lib", // Add this line
 		"advapi32.lib",
 		"shell32.lib",
 		"user32.lib",
