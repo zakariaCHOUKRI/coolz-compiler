@@ -3,6 +3,7 @@ package codegen
 import (
 	"coolz-compiler/ast"
 	"fmt"
+	"strings"
 
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/constant"
@@ -72,9 +73,6 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 
 	// Call printf with the string
 	block.NewCall(cg.printf, strFormat, outString.Params[1])
-	// Print newline
-	// newlineFormat := cg.getStringConstant("\n")
-	// block.NewCall(cg.printf, newlineFormat)
 	block.NewRet(nil)
 
 	// Create out_int method
@@ -90,8 +88,6 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 
 	// Call printf with the integer
 	block.NewCall(cg.printf, intFormat, outInt.Params[1])
-	// Print newline
-	// block.NewCall(cg.printf, newlineFormat)
 	block.NewRet(nil)
 
 	// Create in_string method
@@ -114,10 +110,6 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 
 	// Read the string
 	block.NewCall(cg.scanf, strFormat, buffer)
-
-	// Consume the newline
-	nlFormat := cg.getStringConstant("%*c")
-	block.NewCall(cg.scanf, nlFormat)
 
 	// Get the string length using strlen
 	strlen := cg.module.NewFunc("strlen", types.I64,
@@ -158,9 +150,8 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Read integer
 	block.NewCall(cg.scanf, intFormat, intVar)
 
-	// Consume remaining characters until newline
-	nlFormat = cg.getStringConstant("%*[^\n]%*c")
-	block.NewCall(cg.scanf, nlFormat)
+	// Clear input buffer properly
+	block.NewCall(cg.scanf, cg.getStringConstant("%*c"))
 
 	// Load and return the integer
 	result := block.NewLoad(types.I64, intVar)
@@ -263,9 +254,11 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		return cg.generateLet(block, e)
 	case *ast.ObjectIdentifier:
 		// Look up the variable in current bindings
-		if alloca, ok := cg.currentBindings[e.Value]; ok {
-			// Load the value from the alloca instruction
-			return block.NewLoad(alloca.Type().(*types.PointerType).ElemType, alloca), nil
+		for name, alloca := range cg.currentBindings {
+			if strings.HasPrefix(name, e.Value) {
+				// Load the value from the alloca instruction
+				return block.NewLoad(alloca.Type().(*types.PointerType).ElemType, alloca), nil
+			}
 		}
 		return nil, fmt.Errorf("undefined variable: %s", e.Value)
 	default:
@@ -273,18 +266,21 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 	}
 }
 
-// generateLet generates code for a let expression
 func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression) (value.Value, error) {
-	// Create new allocas for all bindings
-	bindings := make(map[string]value.Value)
+	// Store the previous bindings map to restore later
+	prevBindings := make(map[string]value.Value)
+	for k, v := range cg.currentBindings {
+		prevBindings[k] = v
+	}
 
 	// Process each binding
-	for _, binding := range letExpr.Bindings {
+	for i, binding := range letExpr.Bindings {
+		uniqueName := fmt.Sprintf("%s_let%d_%d", binding.Identifier.Value, len(cg.currentBindings), i)
+
 		// Allocate space for the variable
 		varType := cg.getLLVMType(binding.Type)
 		alloca := block.NewAlloca(varType)
 
-		// If there's an initialization expression, evaluate it and store
 		if binding.Init != nil {
 			initValue, err := cg.generateExpression(block, binding.Init)
 			if err != nil {
@@ -292,7 +288,6 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 			}
 			block.NewStore(initValue, alloca)
 		} else {
-			// Initialize with default value
 			var defaultValue value.Value
 			switch binding.Type.Value {
 			case "Int":
@@ -307,13 +302,8 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 			block.NewStore(defaultValue, alloca)
 		}
 
-		// Store the allocation in our bindings map
-		bindings[binding.Identifier.Value] = alloca
+		cg.currentBindings[uniqueName] = alloca
 	}
-
-	// Store the previous bindings map to restore later if needed
-	prevBindings := cg.currentBindings
-	cg.currentBindings = bindings
 
 	// Generate code for the body expression
 	result, err := cg.generateExpression(block, letExpr.In)
