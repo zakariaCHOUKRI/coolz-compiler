@@ -336,9 +336,9 @@ func (cg *CodeGenerator) generateBlock(block *ir.Block, blockExpr *ast.BlockExpr
 			return nil, err
 		}
 
-		// If this is the last expression in the block
-		if i == len(blockExpr.Expressions)-1 {
-			// Add return instruction for the last value
+		// Only add return instruction if this is the last expression
+		// AND we're in a method body (not in a let expression or other block)
+		if i == len(blockExpr.Expressions)-1 && block.Term == nil {
 			block.NewRet(lastValue)
 		}
 	}
