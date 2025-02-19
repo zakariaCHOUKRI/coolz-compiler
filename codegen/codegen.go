@@ -7,6 +7,7 @@ import (
 
 	"github.com/llir/llvm/ir"
 	"github.com/llir/llvm/ir/constant"
+	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
@@ -261,6 +262,52 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 			}
 		}
 		return nil, fmt.Errorf("undefined variable: %s", e.Value)
+	case *ast.BinaryExpression:
+		left, err := cg.generateExpression(block, e.Left)
+		if err != nil {
+			return nil, err
+		}
+		right, err := cg.generateExpression(block, e.Right)
+		if err != nil {
+			return nil, err
+		}
+
+		switch e.Operator {
+		// Arithmetic operations (both operands must be Int)
+		case "+":
+			return block.NewAdd(left, right), nil
+		case "-":
+			return block.NewSub(left, right), nil
+		case "*":
+			return block.NewMul(left, right), nil
+		case "/":
+			return block.NewSDiv(left, right), nil // Integer division only
+
+		// Comparison operations
+		case "<":
+			return block.NewICmp(enum.IPredSLT, left, right), nil // Signed less than
+		case "<=":
+			return block.NewICmp(enum.IPredSLE, left, right), nil // Signed less than or equal
+		case "=":
+			// For basic types (Int, Bool, String), use integer comparison
+			return block.NewICmp(enum.IPredEQ, left, right), nil // Equal
+		default:
+			return nil, fmt.Errorf("unsupported binary operator: %s", e.Operator)
+		}
+	case *ast.UnaryExpression:
+		operand, err := cg.generateExpression(block, e.Right)
+		if err != nil {
+			return nil, err
+		}
+
+		switch e.Operator {
+		case "~": // Integer complement
+			return block.NewSub(constant.NewInt(types.I64, 0), operand), nil
+		case "not": // Boolean complement
+			return block.NewXor(operand, constant.NewInt(types.I1, 1)), nil
+		default:
+			return nil, fmt.Errorf("unsupported unary operator: %s", e.Operator)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported expression type: %T", expr)
 	}
