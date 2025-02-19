@@ -10,355 +10,279 @@ import (
 	"github.com/llir/llvm/ir/value"
 )
 
-// CodeGen represents the code generator for the Cool programming language.
-type CodeGen struct {
-	module *ir.Module
+// CodeGenerator holds the state needed for code generation
+type CodeGenerator struct {
+	module          *ir.Module
+	currentFunc     *ir.Func
+	stringConstants map[string]*ir.Global
+	printf          *ir.Func
+	methods         map[string]map[string]*ir.Func
 }
 
-// NewCodeGen creates a new CodeGen instance.
-func NewCodeGen() *CodeGen {
-	return &CodeGen{
-		module: ir.NewModule(),
+// New creates a new code generator
+func New() *CodeGenerator {
+	cg := &CodeGenerator{
+		module:          ir.NewModule(),
+		stringConstants: make(map[string]*ir.Global),
+		methods:         make(map[string]map[string]*ir.Func),
 	}
+
+	// Set target triple for Windows MSVC
+	cg.module.TargetTriple = "x86_64-pc-windows-msvc"
+
+	// Declare external printf function
+	printfType := types.NewPointer(types.I8)
+	cg.printf = cg.module.NewFunc("printf", types.I32, ir.NewParam("format", printfType))
+	cg.printf.Sig.Variadic = true
+
+	return cg
 }
 
-// GenerateIR generates LLVM IR for the given AST.
-func (cg *CodeGen) GenerateIR(program *ast.Program) string {
-	// Generate IR for each class in the program
+// Generate generates LLVM IR for the entire program
+func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
+	// Initialize IO class methods
+	cg.methods["IO"] = make(map[string]*ir.Func)
+
+	// Create out_string method
+	outString := cg.module.NewFunc("IO_out_string", types.Void,
+		ir.NewParam("self", types.NewPointer(types.I8)),
+		ir.NewParam("x", types.NewPointer(types.I8)))
+	cg.methods["IO"]["out_string"] = outString
+
+	block := outString.NewBlock("")
+
+	// Create format string for printing strings
+	strFormat := cg.getStringConstant("%s")
+
+	// Call printf with the string
+	block.NewCall(cg.printf, strFormat, outString.Params[1])
+	// Print newline
+	newlineFormat := cg.getStringConstant("\n")
+	block.NewCall(cg.printf, newlineFormat)
+	block.NewRet(nil)
+
+	// Create out_int method
+	outInt := cg.module.NewFunc("IO_out_int", types.Void,
+		ir.NewParam("self", types.NewPointer(types.I8)),
+		ir.NewParam("x", types.I64))
+	cg.methods["IO"]["out_int"] = outInt
+
+	block = outInt.NewBlock("")
+
+	// Create format string for printing integers
+	intFormat := cg.getStringConstant("%lld")
+
+	// Call printf with the integer
+	block.NewCall(cg.printf, intFormat, outInt.Params[1])
+	// Print newline
+	block.NewCall(cg.printf, newlineFormat)
+	block.NewRet(nil)
+
+	// Generate code for all classes
 	for _, class := range program.Classes {
-		cg.generateClassIR(class)
+		err := cg.generateClass(class)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Return the generated IR as a string
-	return cg.module.String()
+	// Generate main function
+	mainFunc := cg.module.NewFunc("main", types.I32)
+	block = mainFunc.NewBlock("")
+
+	// Find Main class and main method
+	var mainClass *ast.Class
+	for _, class := range program.Classes {
+		if class.Name.Value == "Main" {
+			mainClass = class
+			break
+		}
+	}
+
+	if mainClass == nil {
+		return nil, fmt.Errorf("no Main class found")
+	}
+
+	// Create new Main object (for now just using null as we haven't implemented object creation)
+	mainObj := constant.NewNull(types.NewPointer(types.I8))
+
+	// Call Main.main()
+	mainMethod := cg.methods["Main"]["main"]
+	if mainMethod == nil {
+		return nil, fmt.Errorf("no main method found in Main class")
+	}
+
+	block.NewCall(mainMethod, mainObj)
+
+	// Return 0 from main
+	block.NewRet(constant.NewInt(types.I32, 0))
+
+	return cg.module, nil
 }
 
-// generateClassIR generates LLVM IR for a given class.
-func (cg *CodeGen) generateClassIR(class *ast.Class) {
-	// If the class is the IO class, generate the IO methods
-	if class.Name.Value == "IO" {
-		cg.generateIOIR()
+// getStringConstant creates or retrieves a global string constant
+func (cg *CodeGenerator) getStringConstant(s string) value.Value {
+	if global, exists := cg.stringConstants[s]; exists {
+		return global
 	}
 
-	// Generate IR for each feature in the class
+	// Create new global string constant
+	data := constant.NewCharArrayFromString(s + "\x00")
+	global := cg.module.NewGlobalDef("str."+fmt.Sprintf("%d", len(cg.stringConstants)), data)
+	cg.stringConstants[s] = global
+
+	// Get pointer to the first character
+	zero := constant.NewInt(types.I32, 0)
+	return constant.NewGetElementPtr(global.ContentType, global, zero, zero)
+}
+
+// generateClass generates code for a single class
+func (cg *CodeGenerator) generateClass(class *ast.Class) error {
+	// Initialize method map for this class if it doesn't exist
+	if _, exists := cg.methods[class.Name.Value]; !exists {
+		cg.methods[class.Name.Value] = make(map[string]*ir.Func)
+	}
+
+	// Generate code for each feature (method or attribute)
 	for _, feature := range class.Features {
 		switch f := feature.(type) {
 		case *ast.Method:
-			cg.generateMethodIR(class, f)
+			err := cg.generateMethod(class.Name.Value, f)
+			if err != nil {
+				return err
+			}
 		case *ast.Attribute:
-			cg.generateAttributeIR(class, f)
+			// Attributes will be handled later when we implement object creation
+			continue
 		}
 	}
+
+	return nil
 }
 
-// generateMethodIR generates LLVM IR for a given method.
-func (cg *CodeGen) generateMethodIR(class *ast.Class, method *ast.Method) {
-	// Create a new function for the method
-	fn := cg.module.NewFunc(
-		method.Name.Value,
-		cg.getLLVMType(method.Type),
-		cg.getMethodParams(method)...,
-	)
-
-	// Generate IR for the method body
-	if method.Body != nil {
-		entryBlock := fn.NewBlock("entry")
-		cg.generateExpressionIR(entryBlock, method.Body)
-		// Ensure the block ends with a terminator
-		if retType, ok := fn.Sig.RetType.(*types.PointerType); ok {
-			entryBlock.NewRet(constant.NewNull(retType))
-		} else {
-			// Handle non-pointer return types (e.g., integers, booleans)
-			entryBlock.NewRet(constant.NewInt(types.I32, 0)) // Default to returning 0 for non-pointer types
-		}
-	}
-}
-
-// generateAttributeIR generates LLVM IR for a given attribute.
-func (cg *CodeGen) generateAttributeIR(class *ast.Class, attr *ast.Attribute) {
-	// TODO: Implement attribute code generation
-}
-
-// generateExpressionIR generates LLVM IR for a given expression.
-func (cg *CodeGen) generateExpressionIR(block *ir.Block, expr ast.Expression) value.Value {
+// generateExpression generates code for an expression
+func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression) (value.Value, error) {
 	switch e := expr.(type) {
-	case *ast.IntegerLiteral:
-		return constant.NewInt(types.I32, e.Value)
 	case *ast.StringLiteral:
-		return cg.generateStringLiteralIR(block, e)
-	case *ast.BooleanLiteral:
-		return constant.NewInt(types.I1, boolToInt(e.Value))
-	case *ast.UnaryExpression:
-		return cg.generateUnaryExpressionIR(block, e)
-	case *ast.BinaryExpression:
-		return cg.generateBinaryExpressionIR(block, e)
-	case *ast.IfExpression:
-		return cg.generateIfExpressionIR(block, e)
-	case *ast.WhileExpression:
-		return cg.generateWhileExpressionIR(block, e)
-	case *ast.BlockExpression:
-		return cg.generateBlockExpressionIR(block, e)
-	case *ast.LetExpression:
-		return cg.generateLetExpressionIR(block, e)
-	case *ast.NewExpression:
-		return cg.generateNewExpressionIR(block, e)
-	case *ast.IsVoidExpression:
-		return cg.generateIsVoidExpressionIR(block, e)
-	case *ast.CaseExpression:
-		return cg.generateCaseExpressionIR(block, e)
-	case *ast.Assignment:
-		return cg.generateAssignmentIR(block, e)
+		return cg.getStringConstant(e.Value), nil
+	case *ast.IntegerLiteral:
+		return constant.NewInt(types.I64, e.Value), nil
 	case *ast.DynamicDispatch:
-		return cg.generateDynamicDispatchIR(block, e)
-	case *ast.StaticDispatch:
-		return cg.generateStaticDispatchIR(block, e)
-	case *ast.Self:
-		return cg.generateSelfIR(block, e)
-	case *ast.VoidLiteral:
-		return cg.generateVoidLiteralIR(block, e)
+		return cg.generateDispatch(block, e)
+	case *ast.BlockExpression:
+		return cg.generateBlock(block, e)
 	default:
-		panic(fmt.Sprintf("Unsupported expression type: %T", e))
+		return nil, fmt.Errorf("unsupported expression type: %T", expr)
 	}
 }
 
-// generateStringLiteralIR generates LLVM IR for a string literal.
-func (cg *CodeGen) generateStringLiteralIR(block *ir.Block, str *ast.StringLiteral) value.Value {
-	// TODO: Implement string literal code generation
-	return nil
-}
+// generateBlock generates code for a block expression
+func (cg *CodeGenerator) generateBlock(block *ir.Block, blockExpr *ast.BlockExpression) (value.Value, error) {
+	var lastValue value.Value
+	var err error
 
-// generateUnaryExpressionIR generates LLVM IR for a unary expression.
-func (cg *CodeGen) generateUnaryExpressionIR(block *ir.Block, expr *ast.UnaryExpression) value.Value {
-	// TODO: Implement unary expression code generation
-	return nil
-}
+	// Generate code for each expression in the block
+	for i, expr := range blockExpr.Expressions {
+		lastValue, err = cg.generateExpression(block, expr)
+		if err != nil {
+			return nil, err
+		}
 
-// generateBinaryExpressionIR generates LLVM IR for a binary expression.
-func (cg *CodeGen) generateBinaryExpressionIR(block *ir.Block, expr *ast.BinaryExpression) value.Value {
-	// TODO: Implement binary expression code generation
-	return nil
-}
-
-// generateIfExpressionIR generates LLVM IR for an if expression.
-func (cg *CodeGen) generateIfExpressionIR(block *ir.Block, expr *ast.IfExpression) value.Value {
-	// TODO: Implement if expression code generation
-	return nil
-}
-
-// generateWhileExpressionIR generates LLVM IR for a while expression.
-func (cg *CodeGen) generateWhileExpressionIR(block *ir.Block, expr *ast.WhileExpression) value.Value {
-	// TODO: Implement while expression code generation
-	return nil
-}
-
-// generateBlockExpressionIR generates LLVM IR for a block expression.
-func (cg *CodeGen) generateBlockExpressionIR(block *ir.Block, expr *ast.BlockExpression) value.Value {
-	// TODO: Implement block expression code generation
-	return nil
-}
-
-// generateLetExpressionIR generates LLVM IR for a let expression.
-func (cg *CodeGen) generateLetExpressionIR(block *ir.Block, expr *ast.LetExpression) value.Value {
-	// TODO: Implement let expression code generation
-	return nil
-}
-
-// generateNewExpressionIR generates LLVM IR for a new expression.
-func (cg *CodeGen) generateNewExpressionIR(block *ir.Block, expr *ast.NewExpression) value.Value {
-	// TODO: Implement new expression code generation
-	return nil
-}
-
-// generateIsVoidExpressionIR generates LLVM IR for an isvoid expression.
-func (cg *CodeGen) generateIsVoidExpressionIR(block *ir.Block, expr *ast.IsVoidExpression) value.Value {
-	// TODO: Implement isvoid expression code generation
-	return nil
-}
-
-// generateCaseExpressionIR generates LLVM IR for a case expression.
-func (cg *CodeGen) generateCaseExpressionIR(block *ir.Block, expr *ast.CaseExpression) value.Value {
-	// TODO: Implement case expression code generation
-	return nil
-}
-
-// generateAssignmentIR generates LLVM IR for an assignment expression.
-func (cg *CodeGen) generateAssignmentIR(block *ir.Block, expr *ast.Assignment) value.Value {
-	// TODO: Implement assignment code generation
-	return nil
-}
-
-// generateDynamicDispatchIR generates LLVM IR for a dynamic dispatch expression.
-func (cg *CodeGen) generateDynamicDispatchIR(block *ir.Block, expr *ast.DynamicDispatch) value.Value {
-	// TODO: Implement dynamic dispatch code generation
-	return nil
-}
-
-// generateStaticDispatchIR generates LLVM IR for a static dispatch expression.
-func (cg *CodeGen) generateStaticDispatchIR(block *ir.Block, expr *ast.StaticDispatch) value.Value {
-	// TODO: Implement static dispatch code generation
-	return nil
-}
-
-// generateSelfIR generates LLVM IR for a self expression.
-func (cg *CodeGen) generateSelfIR(block *ir.Block, expr *ast.Self) value.Value {
-	// TODO: Implement self expression code generation
-	return nil
-}
-
-// generateVoidLiteralIR generates LLVM IR for a void literal.
-func (cg *CodeGen) generateVoidLiteralIR(block *ir.Block, expr *ast.VoidLiteral) value.Value {
-	// TODO: Implement void literal code generation
-	return nil
-}
-
-// getLLVMType returns the LLVM type corresponding to the given Cool type.
-func (cg *CodeGen) getLLVMType(typeID *ast.TypeIdentifier) types.Type {
-	switch typeID.Value {
-	case "Int":
-		return types.I32
-	case "Bool":
-		return types.I1
-	case "String":
-		return types.NewPointer(types.I8)
-	case "SELF_TYPE":
-		return types.NewPointer(types.I8) // Assuming SELF_TYPE is a pointer to an object
-	default:
-		return types.NewPointer(types.I8) // Default to a pointer for objects
+		// If this is the last expression in the block
+		if i == len(blockExpr.Expressions)-1 {
+			// Add return instruction for the last value
+			block.NewRet(lastValue)
+		}
 	}
+
+	return lastValue, nil
 }
 
-// getMethodParams returns the LLVM function parameters for a given method.
-func (cg *CodeGen) getMethodParams(method *ast.Method) []*ir.Param {
+// generateDispatch generates code for method dispatch
+func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.DynamicDispatch) (value.Value, error) {
+	// For now, we only handle IO.out_string and IO.out_int
+	methodName := dispatch.Method.Value
+	if methodName != "out_string" && methodName != "out_int" {
+		return nil, fmt.Errorf("unsupported method: %s", methodName)
+	}
+
+	// Generate code for arguments
+	args := make([]value.Value, 0, len(dispatch.Arguments)+1)
+
+	// Add self parameter
+	args = append(args, constant.NewNull(types.NewPointer(types.I8)))
+
+	// Generate code for the argument
+	if len(dispatch.Arguments) != 1 {
+		return nil, fmt.Errorf("expected 1 argument for %s, got %d", methodName, len(dispatch.Arguments))
+	}
+
+	arg, err := cg.generateExpression(block, dispatch.Arguments[0])
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, arg)
+
+	// Call the appropriate IO method
+	method := cg.methods["IO"][methodName]
+	block.NewCall(method, args...)
+
+	// Return null as SELF_TYPE for IO methods
+	return constant.NewNull(types.NewPointer(types.I8)), nil
+}
+
+// generateMethod generates code for a method
+func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) error {
+	// Create function parameters
 	params := make([]*ir.Param, 0, len(method.Formals)+1)
+
 	// Add self parameter
 	params = append(params, ir.NewParam("self", types.NewPointer(types.I8)))
+
 	// Add formal parameters
 	for _, formal := range method.Formals {
-		params = append(params, ir.NewParam(formal.Name.Value, cg.getLLVMType(formal.Type)))
+		paramType := cg.getLLVMType(formal.Type)
+		params = append(params, ir.NewParam(formal.Name.Value, paramType))
 	}
-	return params
-}
 
-// boolToInt converts a boolean value to an integer (1 for true, 0 for false).
-func boolToInt(b bool) int64 {
-	if b {
-		return 1
+	// Create function
+	returnType := cg.getLLVMType(method.Type)
+	fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", className, method.Name.Value),
+		returnType, params...)
+
+	cg.methods[className][method.Name.Value] = fn
+
+	// Generate code for method body
+	cg.currentFunc = fn
+	block := fn.NewBlock("")
+
+	// Generate expression
+	value, err := cg.generateExpression(block, method.Body)
+	if err != nil {
+		return err
 	}
-	return 0
+
+	// Ensure the block is terminated if it doesn't have a terminator
+	if block.Term == nil {
+		block.NewRet(value)
+	}
+
+	return nil
 }
 
-// generateIOIR generates LLVM IR for the IO class methods.
-func (cg *CodeGen) generateIOIR() {
-	// Generate IR for out_string method
-	cg.generateOutStringIR()
-
-	// Generate IR for out_int method
-	cg.generateOutIntIR()
-
-	// Generate IR for in_string method
-	cg.generateInStringIR()
-
-	// Generate IR for in_int method
-	cg.generateInIntIR()
-}
-
-// generateOutStringIR generates LLVM IR for the out_string method.
-func (cg *CodeGen) generateOutStringIR() {
-	// Create the out_string function
-	fn := cg.module.NewFunc(
-		"out_string",
-		types.NewPointer(types.I8), // Return type is SELF_TYPE (assumed to be a pointer)
-		ir.NewParam("self", types.NewPointer(types.I8)), // self parameter
-		ir.NewParam("x", types.NewPointer(types.I8)),    // x parameter (String)
-	)
-
-	// Generate the function body
-	entryBlock := fn.NewBlock("entry")
-	// Call the printf function to print the string
-	printf := cg.module.NewFunc(
-		"printf",
-		types.I32,
-		ir.NewParam("format", types.NewPointer(types.I8)),
-	)
-	printf.Sig.Variadic = true
-	formatStr := cg.module.NewGlobalDef("fmt_str", constant.NewCharArrayFromString("%s\n\x00"))
-	entryBlock.NewCall(printf, formatStr, fn.Params[1])
-	// Return self
-	entryBlock.NewRet(fn.Params[0])
-}
-
-// generateOutIntIR generates LLVM IR for the out_int method.
-func (cg *CodeGen) generateOutIntIR() {
-	// Create the out_int function
-	fn := cg.module.NewFunc(
-		"out_int",
-		types.NewPointer(types.I8), // Return type is SELF_TYPE (assumed to be a pointer)
-		ir.NewParam("self", types.NewPointer(types.I8)), // self parameter
-		ir.NewParam("x", types.I32),                     // x parameter (Int)
-	)
-
-	// Generate the function body
-	entryBlock := fn.NewBlock("entry")
-	// Call the printf function to print the integer
-	printf := cg.module.NewFunc(
-		"printf",
-		types.I32,
-		ir.NewParam("format", types.NewPointer(types.I8)),
-	)
-	printf.Sig.Variadic = true
-	formatStr := cg.module.NewGlobalDef("fmt_int", constant.NewCharArrayFromString("%d\n\x00"))
-	entryBlock.NewCall(printf, formatStr, fn.Params[1])
-	// Return self
-	entryBlock.NewRet(fn.Params[0])
-}
-
-// generateInStringIR generates LLVM IR for the in_string method.
-func (cg *CodeGen) generateInStringIR() {
-	// Create the in_string function
-	fn := cg.module.NewFunc(
-		"in_string",
-		types.NewPointer(types.I8), // Return type is String (pointer to i8)
-		ir.NewParam("self", types.NewPointer(types.I8)), // self parameter
-	)
-
-	// Generate the function body
-	entryBlock := fn.NewBlock("entry")
-	// Call the scanf function to read a string
-	scanf := cg.module.NewFunc(
-		"scanf",
-		types.I32,
-		ir.NewParam("format", types.NewPointer(types.I8)),
-	)
-	scanf.Sig.Variadic = true
-	formatStr := cg.module.NewGlobalDef("fmt_str_in", constant.NewCharArrayFromString("%s\x00"))
-	buffer := entryBlock.NewAlloca(types.NewArray(1024, types.I8))
-	entryBlock.NewCall(scanf, formatStr, buffer)
-	// Return the buffer
-	entryBlock.NewRet(buffer)
-}
-
-// generateInIntIR generates LLVM IR for the in_int method.
-func (cg *CodeGen) generateInIntIR() {
-	// Create the in_int function
-	fn := cg.module.NewFunc(
-		"in_int",
-		types.I32, // Return type is Int
-		ir.NewParam("self", types.NewPointer(types.I8)), // self parameter
-	)
-
-	// Generate the function body
-	entryBlock := fn.NewBlock("entry")
-	// Call the scanf function to read an integer
-	scanf := cg.module.NewFunc(
-		"scanf",
-		types.I32,
-		ir.NewParam("format", types.NewPointer(types.I8)),
-	)
-	scanf.Sig.Variadic = true
-	formatStr := cg.module.NewGlobalDef("fmt_int_in", constant.NewCharArrayFromString("%d\x00"))
-	result := entryBlock.NewAlloca(types.I32)
-	entryBlock.NewCall(scanf, formatStr, result)
-	// Load and return the result
-	loadedResult := entryBlock.NewLoad(types.I32, result)
-	entryBlock.NewRet(loadedResult)
+// getLLVMType converts a COOL type to an LLVM type
+func (cg *CodeGenerator) getLLVMType(typeId *ast.TypeIdentifier) types.Type {
+	switch typeId.Value {
+	case "Int":
+		return types.I64
+	case "String":
+		return types.NewPointer(types.I8)
+	case "Bool":
+		return types.I1
+	case "SELF_TYPE":
+		return types.NewPointer(types.I8)
+	default:
+		// For now, treat all other types as opaque pointers
+		return types.NewPointer(types.I8)
+	}
 }

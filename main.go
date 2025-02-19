@@ -47,10 +47,15 @@ func main() {
 	}
 
 	// Generate code
-	cg := codegen.NewCodeGen()
-	irString := cg.GenerateIR(program)
+	cg := codegen.New()
+	module, err := cg.Generate(program)
+	if err != nil {
+		fmt.Println("Code generation error:", err)
+		os.Exit(1)
+	}
 
-	// Use outputName for both the executable and intermediate file
+	// Write LLVM IR to file
+	irString := module.String()
 	llvmIR := filepath.Join(filepath.Dir(*outputName), "output.ll")
 	if err := os.WriteFile(llvmIR, []byte(irString), 0644); err != nil {
 		panic(err)
