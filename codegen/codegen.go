@@ -16,7 +16,9 @@ type CodeGenerator struct {
 	currentFunc     *ir.Func
 	stringConstants map[string]*ir.Global
 	printf          *ir.Func
+	scanf           *ir.Func
 	methods         map[string]map[string]*ir.Func
+	memset          *ir.Func
 }
 
 // New creates a new code generator
@@ -34,6 +36,18 @@ func New() *CodeGenerator {
 	printfType := types.NewPointer(types.I8)
 	cg.printf = cg.module.NewFunc("printf", types.I32, ir.NewParam("format", printfType))
 	cg.printf.Sig.Variadic = true
+
+	// Declare external scanf function
+	scanfType := types.NewPointer(types.I8)
+	cg.scanf = cg.module.NewFunc("scanf", types.I32, ir.NewParam("format", scanfType))
+	cg.scanf.Sig.Variadic = true
+
+	// Declare external memset function
+	memsetType := types.NewPointer(types.I8)
+	cg.memset = cg.module.NewFunc("memset", types.NewPointer(types.I8),
+		ir.NewParam("str", memsetType),
+		ir.NewParam("c", types.I32),
+		ir.NewParam("n", types.I64))
 
 	return cg
 }
@@ -77,6 +91,78 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Print newline
 	// block.NewCall(cg.printf, newlineFormat)
 	block.NewRet(nil)
+
+	// Create in_string method
+	inString := cg.module.NewFunc("IO_in_string", types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)))
+	cg.methods["IO"]["in_string"] = inString
+
+	block = inString.NewBlock("")
+
+	// Allocate buffer for input string (256 bytes should be enough)
+	buffer := block.NewAlloca(types.NewArray(256, types.I8))
+
+	// Create format string for reading string
+	strFormat = cg.getStringConstant("%255[^\n]")
+
+	// Clear input buffer first (set to all zeros)
+	zero := constant.NewInt(types.I32, 0)
+	strPtr := block.NewGetElementPtr(types.NewArray(256, types.I8), buffer, zero, zero)
+	block.NewCall(cg.memset, strPtr, zero, constant.NewInt(types.I64, 256))
+
+	// Read the string
+	block.NewCall(cg.scanf, strFormat, buffer)
+
+	// Consume the newline
+	nlFormat := cg.getStringConstant("%*c")
+	block.NewCall(cg.scanf, nlFormat)
+
+	// Get the string length using strlen
+	strlen := cg.module.NewFunc("strlen", types.I64,
+		ir.NewParam("str", types.NewPointer(types.I8)))
+
+	strPtr = block.NewGetElementPtr(types.NewArray(256, types.I8), buffer, zero, zero)
+	length := block.NewCall(strlen, strPtr)
+
+	// Allocate permanent storage for the string (+1 for null terminator)
+	size := block.NewAdd(length, constant.NewInt(types.I64, 1))
+	malloc := cg.module.NewFunc("malloc", types.NewPointer(types.I8),
+		ir.NewParam("size", types.I64))
+	permanent := block.NewCall(malloc, size)
+
+	// Copy the string to permanent storage
+	memcpy := cg.module.NewFunc("memcpy", types.NewPointer(types.I8),
+		ir.NewParam("dest", types.NewPointer(types.I8)),
+		ir.NewParam("src", types.NewPointer(types.I8)),
+		ir.NewParam("size", types.I64))
+	block.NewCall(memcpy, permanent, strPtr, size)
+
+	// Return the permanent string
+	block.NewRet(permanent)
+
+	// Create in_int method
+	inInt := cg.module.NewFunc("IO_in_int", types.I64,
+		ir.NewParam("self", types.NewPointer(types.I8)))
+	cg.methods["IO"]["in_int"] = inInt
+
+	block = inInt.NewBlock("")
+
+	// Allocate space for the integer
+	intVar := block.NewAlloca(types.I64)
+
+	// Create format string for reading integer
+	intFormat = cg.getStringConstant("%lld")
+
+	// Read integer
+	block.NewCall(cg.scanf, intFormat, intVar)
+
+	// Consume remaining characters until newline
+	nlFormat = cg.getStringConstant("%*[^\n]%*c")
+	block.NewCall(cg.scanf, nlFormat)
+
+	// Load and return the integer
+	result := block.NewLoad(types.I64, intVar)
+	block.NewRet(result)
 
 	// Generate code for all classes
 	for _, class := range program.Classes {
@@ -200,9 +286,10 @@ func (cg *CodeGenerator) generateBlock(block *ir.Block, blockExpr *ast.BlockExpr
 
 // generateDispatch generates code for method dispatch
 func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.DynamicDispatch) (value.Value, error) {
-	// For now, we only handle IO.out_string and IO.out_int
+	// Handle all IO methods
 	methodName := dispatch.Method.Value
-	if methodName != "out_string" && methodName != "out_int" {
+	if methodName != "out_string" && methodName != "out_int" &&
+		methodName != "in_string" && methodName != "in_int" {
 		return nil, fmt.Errorf("unsupported method: %s", methodName)
 	}
 
@@ -212,22 +299,32 @@ func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.Dynamic
 	// Add self parameter
 	args = append(args, constant.NewNull(types.NewPointer(types.I8)))
 
-	// Generate code for the argument
-	if len(dispatch.Arguments) != 1 {
-		return nil, fmt.Errorf("expected 1 argument for %s, got %d", methodName, len(dispatch.Arguments))
-	}
+	// For output methods, process the argument
+	if methodName == "out_string" || methodName == "out_int" {
+		if len(dispatch.Arguments) != 1 {
+			return nil, fmt.Errorf("expected 1 argument for %s, got %d", methodName, len(dispatch.Arguments))
+		}
 
-	arg, err := cg.generateExpression(block, dispatch.Arguments[0])
-	if err != nil {
-		return nil, err
+		arg, err := cg.generateExpression(block, dispatch.Arguments[0])
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, arg)
+	} else {
+		// For input methods, verify no arguments
+		if len(dispatch.Arguments) != 0 {
+			return nil, fmt.Errorf("expected 0 arguments for %s, got %d", methodName, len(dispatch.Arguments))
+		}
 	}
-	args = append(args, arg)
 
 	// Call the appropriate IO method
 	method := cg.methods["IO"][methodName]
-	block.NewCall(method, args...)
+	result := block.NewCall(method, args...)
 
-	// Return null as SELF_TYPE for IO methods
+	// For input methods, return the result. For output methods, return null
+	if methodName == "in_string" || methodName == "in_int" {
+		return result, nil
+	}
 	return constant.NewNull(types.NewPointer(types.I8)), nil
 }
 
