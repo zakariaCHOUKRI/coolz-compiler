@@ -543,10 +543,7 @@ func (p *Parser) parseWhileExpression() ast.Expression {
 		return nil
 	}
 
-	if p.curTokenIs(lexer.SEMI) {
-		p.nextToken()
-	}
-
+	// Remove the semicolon check since it's not required after pool
 	return exp
 }
 
