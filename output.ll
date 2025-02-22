@@ -5,6 +5,7 @@ target triple = "x86_64-pc-windows-msvc19.43.34808"
 @str.2 = global [9 x i8] c"%255[^\0A]\00"
 @str.3 = global [4 x i8] c"%*c\00"
 @str.4 = global [6 x i8] c"6! = \00"
+@str.5 = global [15 x i8] c"Hello user :)\0A\00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -53,6 +54,18 @@ define i64 @IO_in_int(i8* %self) {
 	ret i64 %4
 }
 
+define i8* @Main_main(i8* %self) {
+0:
+	%1 = call i8* @Main_hello(i8* null)
+	%2 = alloca i64
+	store i64 6, i64* %2
+	call void @IO_out_string(i8* null, i8* getelementptr ([6 x i8], [6 x i8]* @str.4, i32 0, i32 0))
+	%3 = load i64, i64* %2
+	%4 = call i64 @Main_factorial(i8* null, i64 %3)
+	call void @IO_out_int(i8* null, i64 %4)
+	ret i8* null
+}
+
 define i64 @Main_factorial(i8* %self, i64 %n) {
 0:
 	%1 = alloca i64
@@ -77,14 +90,9 @@ if_merge_1:
 	ret i64 %9
 }
 
-define i8* @Main_main(i8* %self) {
+define i8* @Main_hello(i8* %self) {
 0:
-	%1 = alloca i64
-	store i64 6, i64* %1
-	call void @IO_out_string(i8* null, i8* getelementptr ([6 x i8], [6 x i8]* @str.4, i32 0, i32 0))
-	%2 = load i64, i64* %1
-	%3 = call i64 @Main_factorial(i8* null, i64 %2)
-	call void @IO_out_int(i8* null, i64 %3)
+	call void @IO_out_string(i8* null, i8* getelementptr ([15 x i8], [15 x i8]* @str.5, i32 0, i32 0))
 	ret i8* null
 }
 

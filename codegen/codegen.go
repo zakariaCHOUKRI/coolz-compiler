@@ -217,18 +217,44 @@ func (cg *CodeGenerator) getStringConstant(s string) value.Value {
 	return constant.NewGetElementPtr(global.ContentType, global, zero, zero)
 }
 
-// generateClass generates code for a single class
 func (cg *CodeGenerator) generateClass(class *ast.Class) error {
 	// Initialize method map for this class if it doesn't exist
 	if _, exists := cg.methods[class.Name.Value]; !exists {
 		cg.methods[class.Name.Value] = make(map[string]*ir.Func)
 	}
 
-	// Generate code for each feature (method or attribute)
+	// First pass: Register all methods
+	for _, feature := range class.Features {
+		if method, ok := feature.(*ast.Method); ok {
+			// Create function parameters
+			params := make([]*ir.Param, 0, len(method.Formals)+1)
+
+			// Add self parameter
+			selfParam := ir.NewParam("self", types.NewPointer(types.I8))
+			params = append(params, selfParam)
+
+			// Add formal parameters
+			for _, formal := range method.Formals {
+				paramType := cg.getLLVMType(formal.Type)
+				param := ir.NewParam(formal.Name.Value, paramType)
+				params = append(params, param)
+			}
+
+			// Create function
+			returnType := cg.getLLVMType(method.Type)
+			fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", class.Name.Value, method.Name.Value),
+				returnType, params...)
+
+			// Store the method in our method map
+			cg.methods[class.Name.Value][method.Name.Value] = fn
+		}
+	}
+
+	// Second pass: Generate method bodies
 	for _, feature := range class.Features {
 		switch f := feature.(type) {
 		case *ast.Method:
-			err := cg.generateMethod(class.Name.Value, f)
+			err := cg.generateMethodBody(class.Name.Value, f)
 			if err != nil {
 				return err
 			}
@@ -237,6 +263,46 @@ func (cg *CodeGenerator) generateClass(class *ast.Class) error {
 			continue
 		}
 	}
+
+	return nil
+}
+
+// Add this new function to handle method body generation
+func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method) error {
+	// Save the previous bindings
+	prevBindings := cg.currentBindings
+	cg.currentBindings = make(map[string]value.Value)
+
+	// Get the previously created function
+	fn := cg.methods[className][method.Name.Value]
+	cg.currentFunc = fn
+
+	// Create entry block
+	block := fn.NewBlock("")
+
+	// Add parameters to current bindings
+	for i, formal := range method.Formals {
+		// Create an alloca for the parameter
+		alloca := block.NewAlloca(fn.Params[i+1].Type())
+		// Store the parameter value
+		block.NewStore(fn.Params[i+1], alloca)
+		// Add to bindings
+		cg.currentBindings[formal.Name.Value] = alloca
+	}
+
+	// Generate expression
+	value, block, err := cg.generateExpression(block, method.Body)
+	if err != nil {
+		return err
+	}
+
+	// Ensure the block is terminated
+	if block.Term == nil {
+		block.NewRet(value)
+	}
+
+	// Restore previous bindings
+	cg.currentBindings = prevBindings
 
 	return nil
 }

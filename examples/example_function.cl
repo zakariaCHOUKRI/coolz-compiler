@@ -1,6 +1,7 @@
 class Main inherits IO {
     main(): Object {
         {
+            self.hello();
             let x : Int <- 6 in {
                 out_string("6! = ");
                 out_int(factorial(x));
@@ -15,6 +16,12 @@ class Main inherits IO {
             } else {
                 n * factorial(n - 1);
             } fi;
+        }
+    };
+
+    hello(): Object {
+        {
+            out_string("Hello user :)\n");
         }
     };
 };
