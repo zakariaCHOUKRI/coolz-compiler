@@ -308,6 +308,76 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		default:
 			return nil, fmt.Errorf("unsupported unary operator: %s", e.Operator)
 		}
+	case *ast.IfExpression:
+		// Generate code for the condition
+		condValue, err := cg.generateExpression(block, e.Condition)
+		if err != nil {
+			return nil, err
+		}
+
+		// Create the necessary basic blocks
+		thenBlock := cg.currentFunc.NewBlock("")
+		elseBlock := cg.currentFunc.NewBlock("")
+		mergeBlock := cg.currentFunc.NewBlock("")
+
+		// Convert condition to i1 (boolean) if necessary
+		var condBool value.Value
+		if !types.Equal(condValue.Type(), types.I1) {
+			// For COOL, we consider non-zero values as true
+			condBool = block.NewICmp(enum.IPredNE, condValue,
+				constant.NewInt(types.I64, 0))
+		} else {
+			condBool = condValue
+		}
+
+		// Create conditional branch
+		block.NewCondBr(condBool, thenBlock, elseBlock)
+
+		// Generate code for then branch
+		thenValue, err := cg.generateExpression(thenBlock, e.Consequence)
+		if err != nil {
+			return nil, err
+		}
+		thenBlock.NewBr(mergeBlock)
+
+		// Generate code for else branch
+		elseValue, err := cg.generateExpression(elseBlock, e.Alternative)
+		if err != nil {
+			return nil, err
+		}
+		elseBlock.NewBr(mergeBlock)
+
+		// Check that types are compatible according to COOL's type system
+		if !types.Equal(thenValue.Type(), elseValue.Type()) {
+			return nil, fmt.Errorf("type mismatch in if expression: then=%v else=%v",
+				thenValue.Type(), elseValue.Type())
+		}
+
+		// Create PHI node in merge block
+		inc1 := &ir.Incoming{
+			X:    thenValue,
+			Pred: thenBlock,
+		}
+
+		inc2 := &ir.Incoming{
+			X:    elseValue,
+			Pred: elseBlock,
+		}
+
+		// Create PHI node with the first incoming value
+		phi := mergeBlock.NewPhi(inc1)
+
+		// Add the second incoming value
+		phi.Incs = append(phi.Incs, inc2)
+
+		// Add a terminator to the merge block (we'll use branch as default)
+		// This is crucial - every block must have a terminator
+		mergeBlock.NewBr(cg.currentFunc.Blocks[len(cg.currentFunc.Blocks)-1])
+
+		// Update the current block to be the merge block
+		block = mergeBlock
+
+		return phi, nil
 	default:
 		return nil, fmt.Errorf("unsupported expression type: %T", expr)
 	}
@@ -361,7 +431,6 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 	return result, err
 }
 
-// generateBlock generates code for a block expression
 func (cg *CodeGenerator) generateBlock(block *ir.Block, blockExpr *ast.BlockExpression) (value.Value, error) {
 	var lastValue value.Value
 	var err error

@@ -11,10 +11,26 @@ class Main inherits IO {
                     out_int(b);
                     out_string("\n");
 
-                    let c : Int <- a / b in {
-                        out_string("integer division of a/b: ");
-                        out_int(c);
-                    };
+
+                    out_string("a / b = ");
+                    out_int(a/b);
+                    out_string(" (integer division)\n");
+
+                    out_string("a + b = ");
+                    out_int(a+b);
+                    out_string("\n");
+
+                    out_string("a * b = ");
+                    out_int(a*b);
+                    out_string("\n");
+
+                    out_string("b - a = ");
+                    out_int(b-a);
+                    out_string("\n");
+
+                    out_string("testing pratt parsing for\n");
+                    out_string("1 - 2 + 3 * 4 + a * b - (2 + 3) = ");
+                    out_int(1 - 2 + 3 * 4 + a*b - (2+3));
                 };
             };
         }
