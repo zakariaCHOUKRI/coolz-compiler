@@ -35,7 +35,7 @@ func New() *CodeGenerator {
 	}
 
 	// Set target triple for Windows MSVC
-	cg.module.TargetTriple = "x86_64-pc-windows-msvc"
+	cg.module.TargetTriple = "x86_64-pc-windows-msvc19.43.34808"
 
 	// Declare external printf function
 	printfType := types.NewPointer(types.I8)
@@ -367,6 +367,70 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 
 		// Return the PHI node and update the current block to mergeBlock.
 		return phi, mergeBlock, nil
+	case *ast.WhileExpression:
+		// Create the three blocks we need
+		cg.blockCounter++
+		condBlock := cg.currentFunc.NewBlock(fmt.Sprintf("while_cond_%d", cg.blockCounter))
+		bodyBlock := cg.currentFunc.NewBlock(fmt.Sprintf("while_body_%d", cg.blockCounter))
+		exitBlock := cg.currentFunc.NewBlock(fmt.Sprintf("while_exit_%d", cg.blockCounter))
+
+		// Branch to condition block from current block
+		block.NewBr(condBlock)
+
+		// Generate condition code
+		condValue, condBlock, err := cg.generateExpression(condBlock, e.Condition) // Fixed: Predicate -> Condition
+		if err != nil {
+			return nil, block, err
+		}
+
+		// Convert condition to boolean if necessary
+		var condBool value.Value
+		if !types.Equal(condValue.Type(), types.I1) {
+			condBool = condBlock.NewICmp(enum.IPredNE, condValue, constant.NewInt(types.I64, 0))
+		} else {
+			condBool = condValue
+		}
+
+		// Create conditional branch
+		condBlock.NewCondBr(condBool, bodyBlock, exitBlock)
+
+		// Generate body code
+		_, bodyBlock, err = cg.generateExpression(bodyBlock, e.Body)
+		if err != nil {
+			return nil, block, err
+		}
+
+		// Branch back to condition block from body
+		bodyBlock.NewBr(condBlock)
+
+		// Return void/null as the result of the loop
+		return constant.NewNull(types.NewPointer(types.I8)), exitBlock, nil
+	case *ast.Assignment:
+		// Look up the variable in current bindings
+		var alloca value.Value
+		found := false
+		for name, a := range cg.currentBindings {
+			if strings.HasPrefix(name, e.Left.(*ast.ObjectIdentifier).Value) {
+				alloca = a
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, block, fmt.Errorf("undefined variable: %s", e.Left.(*ast.ObjectIdentifier).Value)
+		}
+
+		// Generate code for the value expression
+		value, newBlock, err := cg.generateExpression(block, e.Value)
+		if err != nil {
+			return nil, block, err
+		}
+
+		// Store the new value
+		newBlock.NewStore(value, alloca)
+
+		// Return the value that was assigned
+		return value, newBlock, nil
 	default:
 		return nil, block, fmt.Errorf("unsupported expression type: %T", expr)
 	}

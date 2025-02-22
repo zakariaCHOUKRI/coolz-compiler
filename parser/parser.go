@@ -522,21 +522,29 @@ func (p *Parser) parseIfExpression() ast.Expression {
 
 func (p *Parser) parseWhileExpression() ast.Expression {
 	exp := &ast.WhileExpression{Token: p.curToken}
-
-	if !p.expectCurrent(lexer.WHILE) {
-		return nil
-	}
+	p.nextToken() // consume 'while'
 
 	exp.Condition = p.parseExpression(LOWEST)
+	if exp.Condition == nil {
+		return nil
+	}
 
 	if !p.expectCurrent(lexer.LOOP) {
 		return nil
 	}
 
-	exp.Body = p.parseExpression(LOWEST)
+	bodyExpr := p.parseExpression(LOWEST)
+	if bodyExpr == nil {
+		return nil
+	}
+	exp.Body = bodyExpr
 
 	if !p.expectCurrent(lexer.POOL) {
 		return nil
+	}
+
+	if p.curTokenIs(lexer.SEMI) {
+		p.nextToken()
 	}
 
 	return exp
@@ -592,7 +600,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.LPAREN: CALL,
 	lexer.DOT:    CALL,
 	lexer.AT:     CALL,
-	lexer.ASSIGN: LOWEST,
+	lexer.ASSIGN: EQUALS, // Add proper precedence for assignment operator
 }
 
 func (p *Parser) parseLetExpression() ast.Expression {
@@ -634,19 +642,25 @@ func (p *Parser) parseLetExpression() ast.Expression {
 }
 
 func (p *Parser) parseAssignment(left ast.Expression) ast.Expression {
-	exp := &ast.Assignment{
-		Token: p.curToken,
-		Left:  left, // The left-hand side of the assignment
-	}
-
-	if !p.expectCurrent(lexer.ASSIGN) {
+	// Verify left side is an identifier
+	if _, ok := left.(*ast.ObjectIdentifier); !ok {
+		p.errors = append(p.errors, fmt.Sprintf("left side of assignment must be identifier, got %T", left))
 		return nil
 	}
 
-	p.nextToken() // Move to the value expression
-	exp.Value = p.parseExpression(LOWEST)
+	token := p.curToken
+	p.nextToken() // consume '<-'
 
-	return exp
+	value := p.parseExpression(LOWEST)
+	if value == nil {
+		return nil
+	}
+
+	return &ast.Assignment{
+		Token: token,
+		Left:  left,
+		Value: value,
+	}
 }
 
 // Add this debugging function
