@@ -6,6 +6,9 @@ target triple = "x86_64-pc-windows-msvc"
 @str.3 = global [4 x i8] c"%*c\00"
 @str.4 = global [6 x i8] c"true\0A\00"
 @str.5 = global [7 x i8] c"false\0A\00"
+@str.6 = global [25 x i8] c"Please enter your name: \00"
+@str.7 = global [15 x i8] c"Your name is: \00"
+@str.8 = global [2 x i8] c"\0A\00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -57,32 +60,40 @@ define i64 @IO_in_int(i8* %self) {
 define i8* @Main_main(i8* %self) {
 0:
 	%1 = icmp slt i64 2, 1
-	%2 = icmp slt i64 0, 1
-	br i1 %2, label %7, label %8
+	call void @IO_out_string(i8* null, i8* getelementptr ([25 x i8], [25 x i8]* @str.6, i32 0, i32 0))
+	%2 = alloca i8*
+	%3 = call i8* @IO_in_string(i8* null)
+	store i8* %3, i8** %2
+	call void @IO_out_string(i8* null, i8* getelementptr ([15 x i8], [15 x i8]* @str.7, i32 0, i32 0))
+	%4 = load i8*, i8** %2
+	call void @IO_out_string(i8* null, i8* %4)
+	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.8, i32 0, i32 0))
+	%5 = icmp slt i64 2, 1
+	br i1 %5, label %if_then_2, label %if_else_2
 
-3:
+if_then_1:
 	call void @IO_out_string(i8* null, i8* getelementptr ([6 x i8], [6 x i8]* @str.4, i32 0, i32 0))
-	br label %5
+	br label %if_merge_1
 
-4:
+if_else_1:
 	call void @IO_out_string(i8* null, i8* getelementptr ([7 x i8], [7 x i8]* @str.5, i32 0, i32 0))
-	br label %5
+	br label %if_merge_1
 
-5:
-	%6 = phi i8* [ null, %3 ], [ null, %4 ]
-	br label %5
+if_merge_1:
+	%6 = phi i8* [ null, %if_then_1 ], [ null, %if_else_1 ]
+	ret i8* %6
 
-7:
+if_then_2:
 	call void @IO_out_string(i8* null, [6 x i8]* @str.4)
-	br label %9
+	br label %if_merge_2
 
-8:
+if_else_2:
 	call void @IO_out_string(i8* null, [7 x i8]* @str.5)
-	br label %9
+	br label %if_merge_2
 
-9:
-	%10 = phi i8* [ null, %7 ], [ null, %8 ]
-	br label %9
+if_merge_2:
+	%7 = phi i8* [ null, %if_then_2 ], [ null, %if_else_2 ]
+	ret i8* %7
 }
 
 define i32 @main() {

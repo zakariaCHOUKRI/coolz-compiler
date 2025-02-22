@@ -22,6 +22,7 @@ type CodeGenerator struct {
 	methods         map[string]map[string]*ir.Func
 	memset          *ir.Func
 	currentBindings map[string]value.Value
+	blockCounter    int
 }
 
 // New creates a new code generator
@@ -315,10 +316,11 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 			return nil, err
 		}
 
-		// Create the necessary basic blocks
-		thenBlock := cg.currentFunc.NewBlock("")
-		elseBlock := cg.currentFunc.NewBlock("")
-		mergeBlock := cg.currentFunc.NewBlock("")
+		// Increment our counter to generate unique block names
+		cg.blockCounter++
+		thenBlock := cg.currentFunc.NewBlock(fmt.Sprintf("if_then_%d", cg.blockCounter))
+		elseBlock := cg.currentFunc.NewBlock(fmt.Sprintf("if_else_%d", cg.blockCounter))
+		mergeBlock := cg.currentFunc.NewBlock(fmt.Sprintf("if_merge_%d", cg.blockCounter))
 
 		// Convert condition to i1 (boolean) if necessary
 		var condBool value.Value
@@ -370,9 +372,11 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		// Add the second incoming value
 		phi.Incs = append(phi.Incs, inc2)
 
-		// Add a terminator to the merge block (we'll use branch as default)
-		// This is crucial - every block must have a terminator
-		mergeBlock.NewBr(cg.currentFunc.Blocks[len(cg.currentFunc.Blocks)-1])
+		// Remove any forced unconditional branch on mergeBlock
+		if mergeBlock.Term == nil {
+			// If there's no further expression to evaluate, return the phi value
+			mergeBlock.NewRet(phi)
+		}
 
 		// Update the current block to be the merge block
 		block = mergeBlock
@@ -435,18 +439,12 @@ func (cg *CodeGenerator) generateBlock(block *ir.Block, blockExpr *ast.BlockExpr
 	var lastValue value.Value
 	var err error
 
-	// Generate code for each expression in the block
-	for i, expr := range blockExpr.Expressions {
+	for _, expr := range blockExpr.Expressions {
 		lastValue, err = cg.generateExpression(block, expr)
 		if err != nil {
 			return nil, err
 		}
-
-		// Only add return instruction if this is the last expression
-		// AND we're in a method body (not in a let expression or other block)
-		if i == len(blockExpr.Expressions)-1 && block.Term == nil {
-			block.NewRet(lastValue)
-		}
+		// Remove the immediate return here to avoid skipping subsequent expressions.
 	}
 
 	return lastValue, nil
