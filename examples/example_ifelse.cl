@@ -15,7 +15,7 @@ class Main inherits IO {
                 out_string("\n");
             };
 
-            if 2 < 1 then
+            if 1 < 2 then
                 out_string("true\n")
             else
                 out_string("false\n")

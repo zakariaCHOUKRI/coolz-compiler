@@ -241,158 +241,161 @@ func (cg *CodeGenerator) generateClass(class *ast.Class) error {
 	return nil
 }
 
-// generateExpression generates code for an expression
-func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression) (value.Value, error) {
+// generateExpression now returns (value, currentBlock, error)
+// so that expressions which change control flow (like if) can update the current block.
+func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression) (value.Value, *ir.Block, error) {
 	switch e := expr.(type) {
 	case *ast.StringLiteral:
-		return cg.getStringConstant(e.Value), nil
+		return cg.getStringConstant(e.Value), block, nil
 	case *ast.IntegerLiteral:
-		return constant.NewInt(types.I64, e.Value), nil
+		return constant.NewInt(types.I64, e.Value), block, nil
 	case *ast.DynamicDispatch:
+		// Assume generateDispatch is updated similarly.
 		return cg.generateDispatch(block, e)
 	case *ast.BlockExpression:
 		return cg.generateBlock(block, e)
 	case *ast.LetExpression:
 		return cg.generateLet(block, e)
 	case *ast.ObjectIdentifier:
-		// Look up the variable in current bindings
+		// Look up the variable in current bindings.
 		for name, alloca := range cg.currentBindings {
 			if strings.HasPrefix(name, e.Value) {
-				// Load the value from the alloca instruction
-				return block.NewLoad(alloca.Type().(*types.PointerType).ElemType, alloca), nil
+				// Load the value from the alloca instruction.
+				return block.NewLoad(alloca.Type().(*types.PointerType).ElemType, alloca), block, nil
 			}
 		}
-		return nil, fmt.Errorf("undefined variable: %s", e.Value)
+		return nil, block, fmt.Errorf("undefined variable: %s", e.Value)
 	case *ast.BinaryExpression:
-		left, err := cg.generateExpression(block, e.Left)
+		left, block, err := cg.generateExpression(block, e.Left)
 		if err != nil {
-			return nil, err
+			return nil, block, err
 		}
-		right, err := cg.generateExpression(block, e.Right)
+		right, block, err := cg.generateExpression(block, e.Right)
 		if err != nil {
-			return nil, err
+			return nil, block, err
 		}
-
 		switch e.Operator {
 		// Arithmetic operations (both operands must be Int)
 		case "+":
-			return block.NewAdd(left, right), nil
+			return block.NewAdd(left, right), block, nil
 		case "-":
-			return block.NewSub(left, right), nil
+			return block.NewSub(left, right), block, nil
 		case "*":
-			return block.NewMul(left, right), nil
+			return block.NewMul(left, right), block, nil
 		case "/":
-			return block.NewSDiv(left, right), nil // Integer division only
+			return block.NewSDiv(left, right), block, nil // Integer division only
 
 		// Comparison operations
 		case "<":
-			return block.NewICmp(enum.IPredSLT, left, right), nil // Signed less than
+			return block.NewICmp(enum.IPredSLT, left, right), block, nil // Signed less than
 		case "<=":
-			return block.NewICmp(enum.IPredSLE, left, right), nil // Signed less than or equal
+			return block.NewICmp(enum.IPredSLE, left, right), block, nil // Signed less than or equal
 		case "=":
-			// For basic types (Int, Bool, String), use integer comparison
-			return block.NewICmp(enum.IPredEQ, left, right), nil // Equal
+			return block.NewICmp(enum.IPredEQ, left, right), block, nil // Equal
 		default:
-			return nil, fmt.Errorf("unsupported binary operator: %s", e.Operator)
+			return nil, block, fmt.Errorf("unsupported binary operator: %s", e.Operator)
 		}
 	case *ast.UnaryExpression:
-		operand, err := cg.generateExpression(block, e.Right)
+		operand, block, err := cg.generateExpression(block, e.Right)
 		if err != nil {
-			return nil, err
+			return nil, block, err
 		}
-
 		switch e.Operator {
 		case "~": // Integer complement
-			return block.NewSub(constant.NewInt(types.I64, 0), operand), nil
+			return block.NewSub(constant.NewInt(types.I64, 0), operand), block, nil
 		case "not": // Boolean complement
-			return block.NewXor(operand, constant.NewInt(types.I1, 1)), nil
+			return block.NewXor(operand, constant.NewInt(types.I1, 1)), block, nil
 		default:
-			return nil, fmt.Errorf("unsupported unary operator: %s", e.Operator)
+			return nil, block, fmt.Errorf("unsupported unary operator: %s", e.Operator)
 		}
 	case *ast.IfExpression:
-		// Generate code for the condition
-		condValue, err := cg.generateExpression(block, e.Condition)
+		// Generate code for the condition.
+		condValue, block, err := cg.generateExpression(block, e.Condition)
 		if err != nil {
-			return nil, err
+			return nil, block, err
 		}
 
-		// Increment our counter to generate unique block names
+		// Increment counter for unique block names.
 		cg.blockCounter++
 		thenBlock := cg.currentFunc.NewBlock(fmt.Sprintf("if_then_%d", cg.blockCounter))
 		elseBlock := cg.currentFunc.NewBlock(fmt.Sprintf("if_else_%d", cg.blockCounter))
 		mergeBlock := cg.currentFunc.NewBlock(fmt.Sprintf("if_merge_%d", cg.blockCounter))
 
-		// Convert condition to i1 (boolean) if necessary
+		// Convert condition to i1 (boolean) if necessary.
 		var condBool value.Value
 		if !types.Equal(condValue.Type(), types.I1) {
-			// For COOL, we consider non-zero values as true
-			condBool = block.NewICmp(enum.IPredNE, condValue,
-				constant.NewInt(types.I64, 0))
+			// For COOL, we consider non-zero values as true.
+			condBool = block.NewICmp(enum.IPredNE, condValue, constant.NewInt(types.I64, 0))
 		} else {
 			condBool = condValue
 		}
 
-		// Create conditional branch
+		// Create conditional branch.
 		block.NewCondBr(condBool, thenBlock, elseBlock)
 
-		// Generate code for then branch
-		thenValue, err := cg.generateExpression(thenBlock, e.Consequence)
+		// Generate code for then branch.
+		thenValue, thenBlock, err := cg.generateExpression(thenBlock, e.Consequence)
 		if err != nil {
-			return nil, err
+			return nil, block, err
 		}
 		thenBlock.NewBr(mergeBlock)
 
-		// Generate code for else branch
-		elseValue, err := cg.generateExpression(elseBlock, e.Alternative)
+		// Generate code for else branch.
+		elseValue, elseBlock, err := cg.generateExpression(elseBlock, e.Alternative)
 		if err != nil {
-			return nil, err
+			return nil, block, err
 		}
 		elseBlock.NewBr(mergeBlock)
 
-		// Check that types are compatible according to COOL's type system
+		// Check that types are compatible according to COOL's type system.
 		if !types.Equal(thenValue.Type(), elseValue.Type()) {
-			return nil, fmt.Errorf("type mismatch in if expression: then=%v else=%v",
+			return nil, block, fmt.Errorf("type mismatch in if expression: then=%v else=%v",
 				thenValue.Type(), elseValue.Type())
 		}
 
-		// Create PHI node in merge block
+		// Create PHI node in merge block.
 		inc1 := &ir.Incoming{
 			X:    thenValue,
 			Pred: thenBlock,
 		}
-
 		inc2 := &ir.Incoming{
 			X:    elseValue,
 			Pred: elseBlock,
 		}
-
-		// Create PHI node with the first incoming value
 		phi := mergeBlock.NewPhi(inc1)
-
-		// Add the second incoming value
 		phi.Incs = append(phi.Incs, inc2)
 
-		// Remove any forced unconditional branch on mergeBlock
-		if mergeBlock.Term == nil {
-			// If there's no further expression to evaluate, return the phi value
-			mergeBlock.NewRet(phi)
-		}
-
-		// Update the current block to be the merge block
-		block = mergeBlock
-
-		return phi, nil
+		// Return the PHI node and update the current block to mergeBlock.
+		return phi, mergeBlock, nil
 	default:
-		return nil, fmt.Errorf("unsupported expression type: %T", expr)
+		return nil, block, fmt.Errorf("unsupported expression type: %T", expr)
 	}
 }
 
-func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression) (value.Value, error) {
+// generateBlock now threads the current block through each expression.
+func (cg *CodeGenerator) generateBlock(block *ir.Block, blockExpr *ast.BlockExpression) (value.Value, *ir.Block, error) {
+	var lastValue value.Value
+	var err error
+	currentBlock := block
+
+	for _, expr := range blockExpr.Expressions {
+		lastValue, currentBlock, err = cg.generateExpression(currentBlock, expr)
+		if err != nil {
+			return nil, currentBlock, err
+		}
+	}
+
+	return lastValue, currentBlock, nil
+}
+
+func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression) (value.Value, *ir.Block, error) {
 	// Store the previous bindings map to restore later
 	prevBindings := make(map[string]value.Value)
 	for k, v := range cg.currentBindings {
 		prevBindings[k] = v
 	}
+
+	currentBlock := block
 
 	// Process each binding
 	for i, binding := range letExpr.Bindings {
@@ -400,14 +403,15 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 
 		// Allocate space for the variable
 		varType := cg.getLLVMType(binding.Type)
-		alloca := block.NewAlloca(varType)
+		alloca := currentBlock.NewAlloca(varType)
 
 		if binding.Init != nil {
-			initValue, err := cg.generateExpression(block, binding.Init)
+			initValue, newBlock, err := cg.generateExpression(currentBlock, binding.Init)
 			if err != nil {
-				return nil, err
+				return nil, currentBlock, err
 			}
-			block.NewStore(initValue, alloca)
+			currentBlock = newBlock
+			currentBlock.NewStore(initValue, alloca)
 		} else {
 			var defaultValue value.Value
 			switch binding.Type.Value {
@@ -420,43 +424,29 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 			default:
 				defaultValue = constant.NewNull(types.NewPointer(types.I8))
 			}
-			block.NewStore(defaultValue, alloca)
+			currentBlock.NewStore(defaultValue, alloca)
 		}
 
 		cg.currentBindings[uniqueName] = alloca
 	}
 
 	// Generate code for the body expression
-	result, err := cg.generateExpression(block, letExpr.In)
+	result, newBlock, err := cg.generateExpression(currentBlock, letExpr.In)
 
 	// Restore previous bindings
 	cg.currentBindings = prevBindings
 
-	return result, err
+	return result, newBlock, err
 }
 
-func (cg *CodeGenerator) generateBlock(block *ir.Block, blockExpr *ast.BlockExpression) (value.Value, error) {
-	var lastValue value.Value
-	var err error
+func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.DynamicDispatch) (value.Value, *ir.Block, error) {
+	currentBlock := block
 
-	for _, expr := range blockExpr.Expressions {
-		lastValue, err = cg.generateExpression(block, expr)
-		if err != nil {
-			return nil, err
-		}
-		// Remove the immediate return here to avoid skipping subsequent expressions.
-	}
-
-	return lastValue, nil
-}
-
-// generateDispatch generates code for method dispatch
-func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.DynamicDispatch) (value.Value, error) {
 	// Handle all IO methods
 	methodName := dispatch.Method.Value
 	if methodName != "out_string" && methodName != "out_int" &&
 		methodName != "in_string" && methodName != "in_int" {
-		return nil, fmt.Errorf("unsupported method: %s", methodName)
+		return nil, currentBlock, fmt.Errorf("unsupported method: %s", methodName)
 	}
 
 	// Generate code for arguments
@@ -468,33 +458,33 @@ func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.Dynamic
 	// For output methods, process the argument
 	if methodName == "out_string" || methodName == "out_int" {
 		if len(dispatch.Arguments) != 1 {
-			return nil, fmt.Errorf("expected 1 argument for %s, got %d", methodName, len(dispatch.Arguments))
+			return nil, currentBlock, fmt.Errorf("expected 1 argument for %s, got %d", methodName, len(dispatch.Arguments))
 		}
 
-		arg, err := cg.generateExpression(block, dispatch.Arguments[0])
+		arg, newBlock, err := cg.generateExpression(currentBlock, dispatch.Arguments[0])
 		if err != nil {
-			return nil, err
+			return nil, currentBlock, err
 		}
+		currentBlock = newBlock
 		args = append(args, arg)
 	} else {
 		// For input methods, verify no arguments
 		if len(dispatch.Arguments) != 0 {
-			return nil, fmt.Errorf("expected 0 arguments for %s, got %d", methodName, len(dispatch.Arguments))
+			return nil, currentBlock, fmt.Errorf("expected 0 arguments for %s, got %d", methodName, len(dispatch.Arguments))
 		}
 	}
 
 	// Call the appropriate IO method
 	method := cg.methods["IO"][methodName]
-	result := block.NewCall(method, args...)
+	result := currentBlock.NewCall(method, args...)
 
 	// For input methods, return the result. For output methods, return null
 	if methodName == "in_string" || methodName == "in_int" {
-		return result, nil
+		return result, currentBlock, nil
 	}
-	return constant.NewNull(types.NewPointer(types.I8)), nil
+	return constant.NewNull(types.NewPointer(types.I8)), currentBlock, nil
 }
 
-// generateMethod generates code for a method
 func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) error {
 	// Create function parameters
 	params := make([]*ir.Param, 0, len(method.Formals)+1)
@@ -520,7 +510,7 @@ func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) er
 	block := fn.NewBlock("")
 
 	// Generate expression
-	value, err := cg.generateExpression(block, method.Body)
+	value, block, err := cg.generateExpression(block, method.Body)
 	if err != nil {
 		return err
 	}

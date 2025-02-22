@@ -60,16 +60,7 @@ define i64 @IO_in_int(i8* %self) {
 define i8* @Main_main(i8* %self) {
 0:
 	%1 = icmp slt i64 2, 1
-	call void @IO_out_string(i8* null, i8* getelementptr ([25 x i8], [25 x i8]* @str.6, i32 0, i32 0))
-	%2 = alloca i8*
-	%3 = call i8* @IO_in_string(i8* null)
-	store i8* %3, i8** %2
-	call void @IO_out_string(i8* null, i8* getelementptr ([15 x i8], [15 x i8]* @str.7, i32 0, i32 0))
-	%4 = load i8*, i8** %2
-	call void @IO_out_string(i8* null, i8* %4)
-	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.8, i32 0, i32 0))
-	%5 = icmp slt i64 2, 1
-	br i1 %5, label %if_then_2, label %if_else_2
+	br i1 %1, label %if_then_1, label %if_else_1
 
 if_then_1:
 	call void @IO_out_string(i8* null, i8* getelementptr ([6 x i8], [6 x i8]* @str.4, i32 0, i32 0))
@@ -80,8 +71,17 @@ if_else_1:
 	br label %if_merge_1
 
 if_merge_1:
-	%6 = phi i8* [ null, %if_then_1 ], [ null, %if_else_1 ]
-	ret i8* %6
+	%2 = phi i8* [ null, %if_then_1 ], [ null, %if_else_1 ]
+	call void @IO_out_string(i8* null, i8* getelementptr ([25 x i8], [25 x i8]* @str.6, i32 0, i32 0))
+	%3 = alloca i8*
+	%4 = call i8* @IO_in_string(i8* null)
+	store i8* %4, i8** %3
+	call void @IO_out_string(i8* null, i8* getelementptr ([15 x i8], [15 x i8]* @str.7, i32 0, i32 0))
+	%5 = load i8*, i8** %3
+	call void @IO_out_string(i8* null, i8* %5)
+	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.8, i32 0, i32 0))
+	%6 = icmp slt i64 1, 2
+	br i1 %6, label %if_then_2, label %if_else_2
 
 if_then_2:
 	call void @IO_out_string(i8* null, [6 x i8]* @str.4)
