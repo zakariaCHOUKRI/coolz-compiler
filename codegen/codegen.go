@@ -249,9 +249,64 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		return cg.getStringConstant(e.Value), block, nil
 	case *ast.IntegerLiteral:
 		return constant.NewInt(types.I64, e.Value), block, nil
+		// In generateExpression, replace the DynamicDispatch case with:
 	case *ast.DynamicDispatch:
-		// Assume generateDispatch is updated similarly.
-		return cg.generateDispatch(block, e)
+		methodName := e.Method.Value
+
+		// Check if this is an IO method
+		if e.Object == nil || e.Object.TokenLiteral() == "self" {
+			// Check if it's an IO method
+			if methodName == "out_string" || methodName == "out_int" ||
+				methodName == "in_string" || methodName == "in_int" {
+				// Generate code for IO method
+				args := make([]value.Value, 0, len(e.Arguments)+1)
+				args = append(args, constant.NewNull(types.NewPointer(types.I8))) // self
+
+				// Handle IO method arguments
+				if methodName == "out_string" || methodName == "out_int" {
+					if len(e.Arguments) != 1 {
+						return nil, block, fmt.Errorf("expected 1 argument for %s, got %d",
+							methodName, len(e.Arguments))
+					}
+					arg, newBlock, err := cg.generateExpression(block, e.Arguments[0])
+					if err != nil {
+						return nil, block, err
+					}
+					block = newBlock
+					args = append(args, arg)
+				} else {
+					// For input methods, verify no arguments
+					if len(e.Arguments) != 0 {
+						return nil, block, fmt.Errorf("expected 0 arguments for %s, got %d",
+							methodName, len(e.Arguments))
+					}
+				}
+
+				// Call the IO method
+				method := cg.methods["IO"][methodName]
+				result := block.NewCall(method, args...)
+
+				// For input methods, return the result. For output methods, return null
+				if methodName == "in_string" || methodName == "in_int" {
+					return result, block, nil
+				}
+				return constant.NewNull(types.NewPointer(types.I8)), block, nil
+			}
+
+			// Regular method call on self
+			return cg.generateMethodCall(block,
+				constant.NewNull(types.NewPointer(types.I8)),
+				"Main", // Current class
+				methodName,
+				e.Arguments)
+		}
+
+		// Handle normal dynamic dispatch on other objects
+		obj, newBlock, err := cg.generateExpression(block, e.Object)
+		if err != nil {
+			return nil, block, err
+		}
+		return cg.generateMethodCall(newBlock, obj, "Main", methodName, e.Arguments)
 	case *ast.BlockExpression:
 		return cg.generateBlock(block, e)
 	case *ast.LetExpression:
@@ -550,16 +605,22 @@ func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.Dynamic
 }
 
 func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) error {
+	// Save the previous bindings
+	prevBindings := cg.currentBindings
+	cg.currentBindings = make(map[string]value.Value)
+
 	// Create function parameters
 	params := make([]*ir.Param, 0, len(method.Formals)+1)
 
 	// Add self parameter
-	params = append(params, ir.NewParam("self", types.NewPointer(types.I8)))
+	selfParam := ir.NewParam("self", types.NewPointer(types.I8))
+	params = append(params, selfParam)
 
 	// Add formal parameters
 	for _, formal := range method.Formals {
 		paramType := cg.getLLVMType(formal.Type)
-		params = append(params, ir.NewParam(formal.Name.Value, paramType))
+		param := ir.NewParam(formal.Name.Value, paramType)
+		params = append(params, param)
 	}
 
 	// Create function
@@ -567,11 +628,25 @@ func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) er
 	fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", className, method.Name.Value),
 		returnType, params...)
 
+	// Store the method in our method map
+	if cg.methods[className] == nil {
+		cg.methods[className] = make(map[string]*ir.Func)
+	}
 	cg.methods[className][method.Name.Value] = fn
 
 	// Generate code for method body
 	cg.currentFunc = fn
 	block := fn.NewBlock("")
+
+	// Add parameters to current bindings
+	for i, formal := range method.Formals {
+		// Create an alloca for the parameter
+		alloca := block.NewAlloca(params[i+1].Type())
+		// Store the parameter value
+		block.NewStore(params[i+1], alloca)
+		// Add to bindings
+		cg.currentBindings[formal.Name.Value] = alloca
+	}
 
 	// Generate expression
 	value, block, err := cg.generateExpression(block, method.Body)
@@ -579,10 +654,13 @@ func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) er
 		return err
 	}
 
-	// Ensure the block is terminated if it doesn't have a terminator
+	// Ensure the block is terminated
 	if block.Term == nil {
 		block.NewRet(value)
 	}
+
+	// Restore previous bindings
+	cg.currentBindings = prevBindings
 
 	return nil
 }
@@ -602,4 +680,32 @@ func (cg *CodeGenerator) getLLVMType(typeId *ast.TypeIdentifier) types.Type {
 		// For now, treat all other types as opaque pointers
 		return types.NewPointer(types.I8)
 	}
+}
+
+// Add to codegen.go
+func (cg *CodeGenerator) generateMethodCall(block *ir.Block, object value.Value, className string,
+	methodName string, args []ast.Expression) (value.Value, *ir.Block, error) {
+
+	// Get the method from our method map
+	method, exists := cg.methods[className][methodName]
+	if !exists {
+		return nil, block, fmt.Errorf("method %s not found in class %s", methodName, className)
+	}
+
+	// Generate code for each argument
+	llvmArgs := []value.Value{object} // First arg is always 'self'
+	currentBlock := block
+
+	for _, arg := range args {
+		argValue, newBlock, err := cg.generateExpression(currentBlock, arg)
+		if err != nil {
+			return nil, currentBlock, err
+		}
+		currentBlock = newBlock
+		llvmArgs = append(llvmArgs, argValue)
+	}
+
+	// Call the method
+	result := currentBlock.NewCall(method, llvmArgs...)
+	return result, currentBlock, nil
 }

@@ -4,9 +4,7 @@ target triple = "x86_64-pc-windows-msvc19.43.34808"
 @str.1 = global [5 x i8] c"%lld\00"
 @str.2 = global [9 x i8] c"%255[^\0A]\00"
 @str.3 = global [4 x i8] c"%*c\00"
-@str.4 = global [16 x i8] c"Testing loops:\0A\00"
-@str.5 = global [4 x i8] c"i: \00"
-@str.6 = global [2 x i8] c"\0A\00"
+@str.4 = global [6 x i8] c"6! = \00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -55,29 +53,38 @@ define i64 @IO_in_int(i8* %self) {
 	ret i64 %4
 }
 
+define i64 @Main_factorial(i8* %self, i64 %n) {
+0:
+	%1 = alloca i64
+	store i64 %n, i64* %1
+	%2 = load i64, i64* %1
+	%3 = icmp eq i64 %2, 0
+	br i1 %3, label %if_then_1, label %if_else_1
+
+if_then_1:
+	br label %if_merge_1
+
+if_else_1:
+	%4 = load i64, i64* %1
+	%5 = load i64, i64* %1
+	%6 = sub i64 %5, 1
+	%7 = call i64 @Main_factorial(i8* null, i64 %6)
+	%8 = mul i64 %4, %7
+	br label %if_merge_1
+
+if_merge_1:
+	%9 = phi i64 [ 1, %if_then_1 ], [ %8, %if_else_1 ]
+	ret i64 %9
+}
+
 define i8* @Main_main(i8* %self) {
 0:
-	call void @IO_out_string(i8* null, i8* getelementptr ([16 x i8], [16 x i8]* @str.4, i32 0, i32 0))
 	%1 = alloca i64
-	store i64 0, i64* %1
-	br label %while_cond_1
-
-while_cond_1:
+	store i64 6, i64* %1
+	call void @IO_out_string(i8* null, i8* getelementptr ([6 x i8], [6 x i8]* @str.4, i32 0, i32 0))
 	%2 = load i64, i64* %1
-	%3 = icmp slt i64 %2, 10
-	br i1 %3, label %while_body_1, label %while_exit_1
-
-while_body_1:
-	call void @IO_out_string(i8* null, i8* getelementptr ([4 x i8], [4 x i8]* @str.5, i32 0, i32 0))
-	%4 = load i64, i64* %1
-	call void @IO_out_int(i8* null, i64 %4)
-	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.6, i32 0, i32 0))
-	%5 = load i64, i64* %1
-	%6 = add i64 %5, 1
-	store i64 %6, i64* %1
-	br label %while_cond_1
-
-while_exit_1:
+	%3 = call i64 @Main_factorial(i8* null, i64 %2)
+	call void @IO_out_int(i8* null, i64 %3)
 	ret i8* null
 }
 
