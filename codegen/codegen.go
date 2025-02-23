@@ -63,8 +63,12 @@ func New() *CodeGenerator {
 
 // Generate generates LLVM IR for the entire program
 func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
+	// Initialize Object class as the root
+	cg.classParents["Object"] = ""
+	cg.methods["Object"] = make(map[string]*ir.Func)
+
 	// Initialize IO class methods
-	cg.classParents["IO"] = ""
+	cg.classParents["IO"] = "Object" // IO inherits from Object
 	cg.methods["IO"] = make(map[string]*ir.Func)
 
 	// Create out_string method
@@ -164,10 +168,21 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	result := block.NewLoad(types.I64, intVar)
 	block.NewRet(result)
 
-	// Now generate code for all COOL classes in the program
+	// Initialize class inheritance relationships first
 	for _, class := range program.Classes {
-		// ...existing generateClass logic...
-		if err := cg.generateClass(class); err != nil {
+		if class.Parent != nil {
+			cg.classParents[class.Name.Value] = class.Parent.Value
+		} else if class.Name.Value != "Object" {
+			// If no explicit parent is specified and it's not Object,
+			// make Object the implicit parent
+			cg.classParents[class.Name.Value] = "Object"
+		}
+	}
+
+	// Now generate code for all COOL classes
+	for _, class := range program.Classes {
+		err := cg.generateClass(class)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -276,18 +291,21 @@ func (cg *CodeGenerator) generateClass(class *ast.Class) error {
 
 // Walk upward through parents until we find the method or run out of parents
 func (cg *CodeGenerator) lookupMethod(className, methodName string) (*ir.Func, bool) {
-	for className != "" {
-		classMethods, ok := cg.methods[className]
-		if ok {
-			if fn, exists := classMethods[methodName]; exists {
-				return fn, true
+	for currentClass := className; currentClass != ""; {
+		// Check if the class has methods
+		if classMethods, exists := cg.methods[currentClass]; exists {
+			// Check if the method exists in this class
+			if method, exists := classMethods[methodName]; exists {
+				return method, true
 			}
 		}
-		parent := cg.classParents[className]
-		if parent == "" || parent == className {
+
+		// Move up the inheritance chain
+		parent, exists := cg.classParents[currentClass]
+		if !exists || parent == "" {
 			break
 		}
-		className = parent
+		currentClass = parent
 	}
 	return nil, false
 }
@@ -619,8 +637,8 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 	}
 
 	currentBlock := block
-	for i, binding := range letExpr.Bindings {
-		uniqueName := fmt.Sprintf("%s_let%d_%d", binding.Identifier.Value, len(cg.currentBindings), i)
+	for _, binding := range letExpr.Bindings {
+		// uniqueName := fmt.Sprintf("%s_let%d_%d", binding.Identifier.Value, len(cg.currentBindings), i)
 		varType := cg.getLLVMType(binding.Type)
 		alloca := currentBlock.NewAlloca(varType)
 
@@ -647,8 +665,8 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 		}
 
 		// Store the alloca and the COOL type
-		cg.currentBindings[uniqueName] = alloca
-		cg.currentTypes[uniqueName] = binding.Type.Value
+		cg.currentBindings[binding.Identifier.Value] = alloca
+		cg.currentTypes[binding.Identifier.Value] = binding.Type.Value
 	}
 
 	result, newBlock, err := cg.generateExpression(currentBlock, letExpr.In)
