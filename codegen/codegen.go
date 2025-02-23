@@ -67,6 +67,40 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	cg.classParents["Object"] = ""
 	cg.methods["Object"] = make(map[string]*ir.Func)
 
+	// Add abort() method
+	abortFunc := cg.module.NewFunc("Object_abort", types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)))
+	block := abortFunc.NewBlock("")
+
+	// Print "abort\n" and exit
+	abortStr := cg.getStringConstant("abort\n")
+	block.NewCall(cg.printf, abortStr)
+	exitFunc := cg.module.NewFunc("exit", types.Void,
+		ir.NewParam("status", types.I32))
+	block.NewCall(exitFunc, constant.NewInt(types.I32, 1))
+	block.NewUnreachable()
+	cg.methods["Object"]["abort"] = abortFunc
+
+	// Add type_name() method
+	typeNameFunc := cg.module.NewFunc("Object_type_name", types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)))
+	block = typeNameFunc.NewBlock("")
+
+	// For now, just return "Object" string
+	objectStr := cg.getStringConstant("Object")
+	block.NewRet(objectStr)
+	cg.methods["Object"]["type_name"] = typeNameFunc
+
+	// Add copy() method
+	copyFunc := cg.module.NewFunc("Object_copy", types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)))
+	block = copyFunc.NewBlock("")
+
+	// For basic implementation, just return self
+	// TODO: Implement proper shallow copy when object layout is defined
+	block.NewRet(copyFunc.Params[0])
+	cg.methods["Object"]["copy"] = copyFunc
+
 	// Initialize IO class methods
 	cg.classParents["IO"] = "Object" // IO inherits from Object
 	cg.methods["IO"] = make(map[string]*ir.Func)
@@ -77,7 +111,7 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 		ir.NewParam("x", types.NewPointer(types.I8)))
 	cg.methods["IO"]["out_string"] = outString
 
-	block := outString.NewBlock("")
+	block = outString.NewBlock("")
 
 	// Create format string for printing strings
 	strFormat := cg.getStringConstant("%s")
@@ -238,6 +272,23 @@ func (cg *CodeGenerator) getStringConstant(s string) value.Value {
 }
 
 func (cg *CodeGenerator) generateClass(class *ast.Class) error {
+	className := class.Name.Value
+	if cg.methods[className] == nil {
+		cg.methods[className] = make(map[string]*ir.Func)
+	}
+
+	// Inherit Object methods if not already defined
+	if className != "Object" {
+		objectMethods := []string{"abort", "type_name", "copy"}
+		for _, methodName := range objectMethods {
+			if _, exists := cg.methods[className][methodName]; !exists {
+				if method, found := cg.methods["Object"][methodName]; found {
+					cg.methods[className][methodName] = method
+				}
+			}
+		}
+	}
+
 	// Use class.Parent instead of class.Inherits
 	if class.Parent != nil {
 		cg.classParents[class.Name.Value] = class.Parent.Value
@@ -372,10 +423,25 @@ func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method
 // so that expressions which change control flow (like if) can update the current block.
 func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression) (value.Value, *ir.Block, error) {
 	switch e := expr.(type) {
+	case *ast.BooleanLiteral:
+		// In LLVM, booleans are represented as i1 (1-bit integers)
+		// true = 1, false = 0
+		if e.Value {
+			return constant.NewInt(types.I1, 1), block, nil
+		}
+		return constant.NewInt(types.I1, 0), block, nil
 	case *ast.StringLiteral:
 		return cg.getStringConstant(e.Value), block, nil
 	case *ast.IntegerLiteral:
 		return constant.NewInt(types.I64, e.Value), block, nil
+	case *ast.Self:
+		// In COOL, 'self' refers to the first parameter of every method
+		// which is always the current object instance
+		if cg.currentFunc == nil {
+			return nil, block, fmt.Errorf("self used outside of method context")
+		}
+		// Return the first parameter (self) of the current function
+		return cg.currentFunc.Params[0], block, nil
 	case *ast.DynamicDispatch:
 		methodName := e.Method.Value
 

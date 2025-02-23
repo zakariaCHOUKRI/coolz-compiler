@@ -4,8 +4,11 @@ class Parent inherits IO {
     };
 };
 
+class Child inherits Parent {
+};
+
 class Main inherits IO {
     main(): Object {
-        let p : Parent <- new Parent in p.print()
+        let c : Child <- new Child in c.print()
     };
 };
