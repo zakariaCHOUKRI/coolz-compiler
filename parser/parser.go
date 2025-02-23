@@ -549,16 +549,14 @@ func (p *Parser) parseWhileExpression() ast.Expression {
 
 func (p *Parser) parseNewExpression() ast.Expression {
 	exp := &ast.NewExpression{Token: p.curToken}
-
 	if !p.expectCurrent(lexer.NEW) {
 		return nil
 	}
-
 	exp.Type = &ast.TypeIdentifier{
 		Token: p.curToken,
 		Value: p.curToken.Literal,
 	}
-
+	p.nextToken() // Advance past the type identifier
 	return exp
 }
 
