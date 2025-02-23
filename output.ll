@@ -4,10 +4,11 @@ target triple = "x86_64-pc-windows-msvc19.43.34808"
 @str.1 = global [5 x i8] c"%lld\00"
 @str.2 = global [9 x i8] c"%255[^\0A]\00"
 @str.3 = global [4 x i8] c"%*c\00"
-@str.4 = global [16 x i8] c"Testing loops:\0A\00"
-@str.5 = global [4 x i8] c"i: \00"
-@str.6 = global [2 x i8] c"\0A\00"
-@str.7 = global [4 x i8] c"j: \00"
+@str.4 = global [46 x i8] c"Enter an integer greater-than or equal-to 0: \00"
+@str.5 = global [50 x i8] c"ERROR: Number must be greater-than or equal-to 0\0A\00"
+@str.6 = global [18 x i8] c"The factorial of \00"
+@str.7 = global [5 x i8] c" is \00"
+@str.8 = global [2 x i8] c"\0A\00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -58,49 +59,56 @@ define i64 @IO_in_int(i8* %self) {
 
 define i8* @Main_main(i8* %self) {
 0:
-	call void @IO_out_string(i8* null, i8* getelementptr ([16 x i8], [16 x i8]* @str.4, i32 0, i32 0))
+	call void @IO_out_string(i8* null, i8* getelementptr ([46 x i8], [46 x i8]* @str.4, i32 0, i32 0))
 	%1 = alloca i64
-	store i64 0, i64* %1
-	br label %while_cond_1
+	%2 = call i64 @IO_in_int(i8* null)
+	store i64 %2, i64* %1
+	%3 = load i64, i64* %1
+	%4 = icmp slt i64 %3, 0
+	br i1 %4, label %if_then_1, label %if_else_1
 
-while_cond_1:
-	%2 = load i64, i64* %1
-	%3 = icmp sle i64 %2, 10
-	br i1 %3, label %while_body_1, label %while_exit_1
+if_then_1:
+	call void @IO_out_string(i8* null, i8* getelementptr ([50 x i8], [50 x i8]* @str.5, i32 0, i32 0))
+	br label %if_merge_1
 
-while_body_1:
-	call void @IO_out_string(i8* null, i8* getelementptr ([4 x i8], [4 x i8]* @str.5, i32 0, i32 0))
-	%4 = load i64, i64* %1
-	call void @IO_out_int(i8* null, i64 %4)
-	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.6, i32 0, i32 0))
+if_else_1:
+	call void @IO_out_string(i8* null, i8* getelementptr ([18 x i8], [18 x i8]* @str.6, i32 0, i32 0))
 	%5 = load i64, i64* %1
-	%6 = add i64 %5, 1
-	store i64 %6, i64* %1
-	br label %while_cond_1
+	call void @IO_out_int(i8* null, i64 %5)
+	call void @IO_out_string(i8* null, i8* getelementptr ([5 x i8], [5 x i8]* @str.7, i32 0, i32 0))
+	%6 = load i64, i64* %1
+	%7 = call i64 @Main_factorial(i8* null, i64 %6)
+	call void @IO_out_int(i8* null, i64 %7)
+	call void @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.8, i32 0, i32 0))
+	br label %if_merge_1
 
-while_exit_1:
-	call void @IO_out_string(i8* null, [16 x i8]* @str.4)
-	%7 = alloca i64
-	store i64 10, i64* %7
-	br label %while_cond_2
+if_merge_1:
+	%8 = phi i8* [ null, %if_then_1 ], [ null, %if_else_1 ]
+	ret i8* %8
+}
 
-while_cond_2:
-	%8 = load i64, i64* %7
-	%9 = icmp sle i64 0, %8
-	br i1 %9, label %while_body_2, label %while_exit_2
+define i64 @Main_factorial(i8* %self, i64 %num) {
+0:
+	%1 = alloca i64
+	store i64 %num, i64* %1
+	%2 = load i64, i64* %1
+	%3 = icmp eq i64 %2, 0
+	br i1 %3, label %if_then_2, label %if_else_2
 
-while_body_2:
-	call void @IO_out_string(i8* null, i8* getelementptr ([4 x i8], [4 x i8]* @str.7, i32 0, i32 0))
-	%10 = load i64, i64* %7
-	call void @IO_out_int(i8* null, i64 %10)
-	call void @IO_out_string(i8* null, [2 x i8]* @str.6)
-	%11 = load i64, i64* %7
-	%12 = sub i64 %11, 1
-	store i64 %12, i64* %7
-	br label %while_cond_2
+if_then_2:
+	br label %if_merge_2
 
-while_exit_2:
-	ret i8* null
+if_else_2:
+	%4 = load i64, i64* %1
+	%5 = load i64, i64* %1
+	%6 = sub i64 %5, 1
+	%7 = call i64 @Main_factorial(i8* null, i64 %6)
+	%8 = mul i64 %4, %7
+	br label %if_merge_2
+
+if_merge_2:
+	%9 = phi i64 [ 1, %if_then_2 ], [ %8, %if_else_2 ]
+	ret i64 %9
 }
 
 define i32 @main() {

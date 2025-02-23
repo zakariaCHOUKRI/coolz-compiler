@@ -3,7 +3,6 @@ package codegen
 import (
 	"coolz-compiler/ast"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/llir/llvm/ir"
@@ -24,17 +23,6 @@ type CodeGenerator struct {
 	memset          *ir.Func
 	currentBindings map[string]value.Value
 	blockCounter    int
-	classes         map[string]*classInfo
-	vtables         map[string]*ir.Global
-	classTypes      map[string]*types.StructType
-}
-
-type classInfo struct {
-	attributes     map[string]int    // Maps attribute names to their indices
-	methods        map[string]int    // Maps method names to vtable indices
-	attributeTypes []types.Type      // Types of attributes in order
-	parent         string            // Name of parent class
-	vtableType     *types.StructType // Type of the vtable
 }
 
 // New creates a new code generator
@@ -44,9 +32,6 @@ func New() *CodeGenerator {
 		stringConstants: make(map[string]*ir.Global),
 		methods:         make(map[string]map[string]*ir.Func),
 		currentBindings: make(map[string]value.Value),
-		classes:         make(map[string]*classInfo),
-		vtables:         make(map[string]*ir.Global),
-		classTypes:      make(map[string]*types.StructType),
 	}
 
 	// Set target triple for Windows MSVC
@@ -76,38 +61,6 @@ func New() *CodeGenerator {
 func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Initialize IO class methods
 	cg.methods["IO"] = make(map[string]*ir.Func)
-
-	// Register IO class first
-	ioClass := &classInfo{
-		attributes: make(map[string]int),
-		methods:    make(map[string]int),
-		parent:     "Object",
-	}
-	cg.classes["IO"] = ioClass
-
-	// Register Object class (base class for all)
-	objClass := &classInfo{
-		attributes: make(map[string]int),
-		methods:    make(map[string]int),
-		parent:     "",
-	}
-	cg.classes["Object"] = objClass
-
-	// First pass: Register all classes
-	for _, class := range program.Classes {
-		err := cg.registerClass(class)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Second pass: Create vtables
-	for _, class := range program.Classes {
-		err := cg.createVTable(class.Name.Value)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	// Create out_string method
 	outString := cg.module.NewFunc("IO_out_string", types.Void,
@@ -206,7 +159,7 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	result := block.NewLoad(types.I64, intVar)
 	block.NewRet(result)
 
-	// Third pass: Generate code for all classes
+	// Generate code for all classes
 	for _, class := range program.Classes {
 		err := cg.generateClass(class)
 		if err != nil {
@@ -362,102 +315,64 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		return cg.getStringConstant(e.Value), block, nil
 	case *ast.IntegerLiteral:
 		return constant.NewInt(types.I64, e.Value), block, nil
-	// In generateExpression, replace the DynamicDispatch case with:
+		// In generateExpression, replace the DynamicDispatch case with:
 	case *ast.DynamicDispatch:
 		methodName := e.Method.Value
 
-		// First check if this is an IO method
-		if methodName == "out_string" || methodName == "out_int" ||
-			methodName == "in_string" || methodName == "in_int" {
-
-			// Existing IO method handling
-			args := make([]value.Value, 0, len(e.Arguments)+1)
-			args = append(args, constant.NewNull(types.NewPointer(types.I8))) // self
-
-			if methodName == "out_string" || methodName == "out_int" {
-				if len(e.Arguments) != 1 {
-					return nil, block, fmt.Errorf("expected 1 argument for %s, got %d",
-						methodName, len(e.Arguments))
-				}
-				arg, newBlock, err := cg.generateExpression(block, e.Arguments[0])
-				if err != nil {
-					return nil, block, err
-				}
-				block = newBlock
-				args = append(args, arg)
-			} else {
-				if len(e.Arguments) != 0 {
-					return nil, block, fmt.Errorf("expected 0 arguments for %s, got %d", methodName, len(e.Arguments))
-				}
-			}
-
-			method := cg.methods["IO"][methodName]
-			result := block.NewCall(method, args...)
-
-			if methodName == "in_string" || methodName == "in_int" {
-				return result, block, nil
-			}
-			return constant.NewNull(types.NewPointer(types.I8)), block, nil
-		}
-
-		// Handle regular method dispatch
-		var obj value.Value
-		var objClassName string
-
+		// Check if this is an IO method
 		if e.Object == nil || e.Object.TokenLiteral() == "self" {
-			obj = cg.currentBindings["self"]
-			objClassName = "Main" // Or the current class name
-		} else {
-			var err error
-			var newBlock *ir.Block
-			obj, newBlock, err = cg.generateExpression(block, e.Object)
-			if err != nil {
-				return nil, block, err
-			}
-			block = newBlock
+			// Check if it's an IO method
+			if methodName == "out_string" || methodName == "out_int" ||
+				methodName == "in_string" || methodName == "in_int" {
+				// Generate code for IO method
+				args := make([]value.Value, 0, len(e.Arguments)+1)
+				args = append(args, constant.NewNull(types.NewPointer(types.I8))) // self
 
-			// Get the static type of the object from bindings
-			if id, ok := e.Object.(*ast.ObjectIdentifier); ok {
-				for name, binding := range cg.currentBindings {
-					// Remove any unique suffixes from binding name
-					baseName := strings.Split(name, "_let")[0]
-					if baseName == id.Value {
-						// Extract class name from binding type
-						if ptrType, ok := binding.Type().(*types.PointerType); ok {
-							if structType, ok := ptrType.ElemType.(*types.StructType); ok {
-								objClassName = strings.Split(structType.Name(), ".")[0]
-								break
-							}
-						}
+				// Handle IO method arguments
+				if methodName == "out_string" || methodName == "out_int" {
+					if len(e.Arguments) != 1 {
+						return nil, block, fmt.Errorf("expected 1 argument for %s, got %d",
+							methodName, len(e.Arguments))
+					}
+					arg, newBlock, err := cg.generateExpression(block, e.Arguments[0])
+					if err != nil {
+						return nil, block, err
+					}
+					block = newBlock
+					args = append(args, arg)
+				} else {
+					// For input methods, verify no arguments
+					if len(e.Arguments) != 0 {
+						return nil, block, fmt.Errorf("expected 0 arguments for %s, got %d",
+							methodName, len(e.Arguments))
 					}
 				}
-				if objClassName == "" {
-					return nil, block, fmt.Errorf("could not determine type for object %s", id.Value)
+
+				// Call the IO method
+				method := cg.methods["IO"][methodName]
+				result := block.NewCall(method, args...)
+
+				// For input methods, return the result. For output methods, return null
+				if methodName == "in_string" || methodName == "in_int" {
+					return result, block, nil
 				}
+				return constant.NewNull(types.NewPointer(types.I8)), block, nil
 			}
+
+			// Regular method call on self
+			return cg.generateMethodCall(block,
+				constant.NewNull(types.NewPointer(types.I8)),
+				"Main", // Current class
+				methodName,
+				e.Arguments)
 		}
 
-		// Find and call the method through the class hierarchy
-		method := cg.findMethodInHierarchy(objClassName, methodName)
-		if method == nil {
-			return nil, block, fmt.Errorf("method %s not found in class %s", methodName, objClassName)
+		// Handle normal dynamic dispatch on other objects
+		obj, newBlock, err := cg.generateExpression(block, e.Object)
+		if err != nil {
+			return nil, block, err
 		}
-
-		// Generate arguments
-		args := make([]value.Value, 0, len(e.Arguments)+1)
-		args = append(args, obj) // self
-
-		for _, arg := range e.Arguments {
-			argValue, newBlock, err := cg.generateExpression(block, arg)
-			if err != nil {
-				return nil, block, err
-			}
-			block = newBlock
-			args = append(args, argValue)
-		}
-
-		result := block.NewCall(method, args...)
-		return result, block, nil
+		return cg.generateMethodCall(newBlock, obj, "Main", methodName, e.Arguments)
 	case *ast.BlockExpression:
 		return cg.generateBlock(block, e)
 	case *ast.LetExpression:
@@ -671,53 +586,33 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 	for i, binding := range letExpr.Bindings {
 		uniqueName := fmt.Sprintf("%s_let%d_%d", binding.Identifier.Value, len(cg.currentBindings), i)
 
-		if binding.Type.Value != "Int" && binding.Type.Value != "Bool" && binding.Type.Value != "String" {
-			if binding.Init != nil {
-				initValue, newBlock, err := cg.generateExpression(currentBlock, binding.Init)
-				if err != nil {
-					return nil, currentBlock, err
-				}
-				currentBlock = newBlock
-				cg.currentBindings[uniqueName] = initValue
-			} else {
-				// Create a new object of the specified type
-				objValue, newBlock, err := cg.generateNew(currentBlock, binding.Type.Value)
-				if err != nil {
-					return nil, currentBlock, err
-				}
-				currentBlock = newBlock
-				cg.currentBindings[uniqueName] = objValue
+		// Allocate space for the variable
+		varType := cg.getLLVMType(binding.Type)
+		alloca := currentBlock.NewAlloca(varType)
+
+		if binding.Init != nil {
+			initValue, newBlock, err := cg.generateExpression(currentBlock, binding.Init)
+			if err != nil {
+				return nil, currentBlock, err
 			}
+			currentBlock = newBlock
+			currentBlock.NewStore(initValue, alloca)
 		} else {
-
-			// Allocate space for the variable
-			varType := cg.getLLVMType(binding.Type)
-			alloca := currentBlock.NewAlloca(varType)
-
-			if binding.Init != nil {
-				initValue, newBlock, err := cg.generateExpression(currentBlock, binding.Init)
-				if err != nil {
-					return nil, currentBlock, err
-				}
-				currentBlock = newBlock
-				currentBlock.NewStore(initValue, alloca)
-			} else {
-				var defaultValue value.Value
-				switch binding.Type.Value {
-				case "Int":
-					defaultValue = constant.NewInt(types.I64, 0)
-				case "Bool":
-					defaultValue = constant.NewBool(false)
-				case "String":
-					defaultValue = constant.NewNull(types.NewPointer(types.I8))
-				default:
-					defaultValue = constant.NewNull(types.NewPointer(types.I8))
-				}
-				currentBlock.NewStore(defaultValue, alloca)
+			var defaultValue value.Value
+			switch binding.Type.Value {
+			case "Int":
+				defaultValue = constant.NewInt(types.I64, 0)
+			case "Bool":
+				defaultValue = constant.NewBool(false)
+			case "String":
+				defaultValue = constant.NewNull(types.NewPointer(types.I8))
+			default:
+				defaultValue = constant.NewNull(types.NewPointer(types.I8))
 			}
-
-			cg.currentBindings[uniqueName] = alloca
+			currentBlock.NewStore(defaultValue, alloca)
 		}
+
+		cg.currentBindings[uniqueName] = alloca
 	}
 
 	// Generate code for the body expression
@@ -727,51 +622,6 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 	cg.currentBindings = prevBindings
 
 	return result, newBlock, err
-}
-
-func (cg *CodeGenerator) generateDynamicDispatch(block *ir.Block, object value.Value, className string, methodName string, args []ast.Expression) (value.Value, *ir.Block, error) {
-	// Find method in class hierarchy
-	method := cg.findMethodInHierarchy(className, methodName)
-	if method == nil {
-		return nil, block, fmt.Errorf("method %s not found in class %s", methodName, className)
-	}
-
-	// Generate code for each argument
-	llvmArgs := []value.Value{object} // First arg is always 'self'
-	currentBlock := block
-
-	for _, arg := range args {
-		argValue, newBlock, err := cg.generateExpression(currentBlock, arg)
-		if err != nil {
-			return nil, currentBlock, err
-		}
-		currentBlock = newBlock
-		llvmArgs = append(llvmArgs, argValue)
-	}
-
-	// Call the method
-	result := currentBlock.NewCall(method, llvmArgs...)
-	return result, currentBlock, nil
-}
-
-func (cg *CodeGenerator) findMethodInHierarchy(className string, methodName string) *ir.Func {
-	current := className
-	for current != "" {
-		// Check if method exists in current class
-		if methods, exists := cg.methods[current]; exists {
-			if method, exists := methods[methodName]; exists {
-				return method
-			}
-		}
-
-		// Move up to parent class
-		if classInfo, exists := cg.classes[current]; exists {
-			current = classInfo.parent
-		} else {
-			current = ""
-		}
-	}
-	return nil
 }
 
 func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.DynamicDispatch) (value.Value, *ir.Block, error) {
@@ -924,195 +774,4 @@ func (cg *CodeGenerator) generateMethodCall(block *ir.Block, object value.Value,
 	// Call the method
 	result := currentBlock.NewCall(method, llvmArgs...)
 	return result, currentBlock, nil
-}
-
-// Add new method to register a class
-func (cg *CodeGenerator) registerClass(class *ast.Class) error {
-	className := class.Name.Value
-	parentName := "Object"
-	if class.Parent != nil {
-		parentName = class.Parent.Value
-	}
-
-	// Check if class is already registered
-	if _, exists := cg.classes[className]; exists {
-		return nil // Already registered
-	}
-
-	// Check if parent exists and register it first if needed
-	if _, exists := cg.classes[parentName]; !exists && parentName != "Object" {
-		return fmt.Errorf("parent class %s not found for class %s", parentName, className)
-	}
-
-	info := &classInfo{
-		attributes:     make(map[string]int),
-		methods:        make(map[string]int),
-		attributeTypes: make([]types.Type, 0),
-		parent:         parentName,
-	}
-
-	// Inherit parent's attributes
-	if parentInfo, exists := cg.classes[parentName]; exists {
-		// Copy parent's attributes
-		for attrName, idx := range parentInfo.attributes {
-			info.attributes[attrName] = idx
-			if idx < len(parentInfo.attributeTypes) {
-				info.attributeTypes = append(info.attributeTypes, parentInfo.attributeTypes[idx])
-			}
-		}
-	}
-
-	// Add class's own attributes
-	attrIndex := len(info.attributeTypes)
-	for _, feature := range class.Features {
-		if attr, ok := feature.(*ast.Attribute); ok {
-			if _, exists := info.attributes[attr.Name.Value]; exists {
-				return fmt.Errorf("attribute %s redefined in class %s", attr.Name.Value, className)
-			}
-			info.attributes[attr.Name.Value] = attrIndex
-			info.attributeTypes = append(info.attributeTypes, cg.getLLVMType(attr.Type))
-			attrIndex++
-		}
-	}
-
-	// Initialize method map for this class
-	cg.methods[className] = make(map[string]*ir.Func)
-
-	// Create the class type including vtable pointer
-	classType := types.NewStruct(append(
-		[]types.Type{types.NewPointer(types.I8)}, // vtable pointer
-		info.attributeTypes...,
-	)...)
-	cg.classTypes[className] = classType
-
-	// Store the class info
-	cg.classes[className] = info
-
-	return nil
-}
-
-// Add new method to create vtable
-func (cg *CodeGenerator) createVTable(className string) error {
-	info := cg.classes[className]
-	if info == nil {
-		return fmt.Errorf("class %s not found", className)
-	}
-
-	// Collect all methods including inherited ones
-	methods := make(map[string]*ir.Func)
-
-	// Start from the current class and work up the inheritance chain
-	current := className
-	for current != "" {
-		if classInfo, exists := cg.classes[current]; exists {
-			// Add methods from current class, don't override existing ones
-			if methodMap, exists := cg.methods[current]; exists {
-				for name, method := range methodMap {
-					if _, exists := methods[name]; !exists {
-						methods[name] = method
-					}
-				}
-			}
-			current = classInfo.parent
-		} else {
-			break
-		}
-	}
-
-	// Create vtable type and global
-	methodTypes := make([]types.Type, 0, len(methods))
-	methodValues := make([]constant.Constant, 0, len(methods))
-
-	// Sort method names for consistent vtable layout
-	methodNames := make([]string, 0, len(methods))
-	for name := range methods {
-		methodNames = append(methodNames, name)
-	}
-	sort.Strings(methodNames)
-
-	for _, name := range methodNames {
-		method := methods[name]
-		info.methods[name] = len(methodTypes)
-		methodTypes = append(methodTypes, types.NewPointer(method.Type()))
-		methodValues = append(methodValues, method)
-	}
-
-	vtableType := types.NewStruct(methodTypes...)
-	info.vtableType = vtableType
-
-	vtable := cg.module.NewGlobalDef(
-		fmt.Sprintf("%s_vtable", className),
-		constant.NewStruct(vtableType, methodValues...),
-	)
-	cg.vtables[className] = vtable
-
-	return nil
-}
-
-// Modified generateNew function with fixes for the type errors
-func (cg *CodeGenerator) generateNew(block *ir.Block, className string) (value.Value, *ir.Block, error) {
-	// Get class info and type
-	info := cg.classes[className]
-	if info == nil {
-		return nil, block, fmt.Errorf("class %s not found", className)
-	}
-	classType := cg.classTypes[className]
-
-	// Calculate size manually by getting size of each field
-	var totalSize int64 = 8 // Start with 8 bytes for vtable pointer
-	for _, attrType := range info.attributeTypes {
-		switch attrType.(type) {
-		case *types.IntType:
-			totalSize += 8 // Int64
-		case *types.FloatType:
-			totalSize += 8 // Double
-		case *types.PointerType:
-			totalSize += 8 // Pointers are 8 bytes
-		case *types.ArrayType:
-			totalSize += 8 // Array pointer
-		default:
-			totalSize += 8 // Default to 8 bytes for other types
-		}
-	}
-
-	// Allocate memory for the object
-	malloc := cg.module.NewFunc("malloc", types.NewPointer(types.I8),
-		ir.NewParam("size", types.I64))
-	size := constant.NewInt(types.I64, totalSize)
-	objPtr := block.NewCall(malloc, size)
-
-	// Cast to correct type
-	typedPtr := block.NewBitCast(objPtr, types.NewPointer(classType))
-
-	// Store vtable pointer
-	vtablePtr := block.NewGetElementPtr(info.vtableType, cg.vtables[className],
-		constant.NewInt(types.I32, 0))
-	block.NewStore(vtablePtr,
-		block.NewGetElementPtr(classType, typedPtr,
-			constant.NewInt(types.I32, 0),
-			constant.NewInt(types.I32, 0)))
-
-	// Initialize attributes with default values
-	for i, attrType := range info.attributeTypes {
-		attrPtr := block.NewGetElementPtr(classType, typedPtr,
-			constant.NewInt(types.I32, 0),
-			constant.NewInt(types.I32, int64(i+1)))
-
-		var defaultValue value.Value
-		switch t := attrType.(type) {
-		case *types.IntType:
-			defaultValue = constant.NewInt(types.I64, 0)
-		case *types.FloatType:
-			defaultValue = constant.NewFloat(types.Double, 0.0)
-		case *types.PointerType:
-			defaultValue = constant.NewNull(t)
-		case *types.ArrayType:
-			defaultValue = constant.NewNull(types.NewPointer(t))
-		default:
-			defaultValue = constant.NewNull(types.NewPointer(types.I8))
-		}
-		block.NewStore(defaultValue, attrPtr)
-	}
-
-	return typedPtr, block, nil
 }
