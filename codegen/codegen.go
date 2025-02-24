@@ -96,11 +96,11 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	block.NewUnreachable()
 	cg.methods["Object"]["abort"] = abortFunc
 
-	// Add type_name() method
+	// Modify the type_name() method initialization to use a vtable approach
 	typeNameFunc := cg.module.NewFunc("Object_type_name", types.NewPointer(types.I8),
 		ir.NewParam("self", types.NewPointer(types.I8)))
 	block = typeNameFunc.NewBlock("")
-	// Return "Object" for now (child classes can override for correct name)
+	// Now we'll return "Object" only for the Object class
 	block.NewRet(cg.getStringConstant("Object"))
 	cg.methods["Object"]["type_name"] = typeNameFunc
 
@@ -362,6 +362,23 @@ func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) e
 			cg.currentTypes[fmt.Sprintf("%s_%s", className, f.Name.Value)] = f.Type.Value
 		}
 	}
+
+	// After registering all methods, we need to override type_name for each class
+	// Add this after the first pass where methods are registered
+
+	// Override type_name method for this class
+	typeNameFunc := cg.module.NewFunc(fmt.Sprintf("%s_type_name", className),
+		types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)))
+
+	block := typeNameFunc.NewBlock("")
+
+	// Return a string constant with the actual class name
+	classNameStr := cg.getStringConstant(className)
+	block.NewRet(classNameStr)
+
+	// Register the overridden method
+	cg.methods[className]["type_name"] = typeNameFunc
 
 	// Second pass: Generate method bodies
 	for _, feature := range class.Features {
