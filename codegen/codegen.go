@@ -25,6 +25,9 @@ type CodeGenerator struct {
 	currentTypes    map[string]string // Add this map to store variable -> COOL type
 	blockCounter    int
 	classParents    map[string]string
+	classLayouts    map[string]*types.StructType
+	classFields     map[string]map[string]int // Maps class->field->index
+	currentClass    string
 }
 
 // New creates a new code generator
@@ -36,6 +39,8 @@ func New() *CodeGenerator {
 		currentBindings: make(map[string]value.Value),
 		currentTypes:    make(map[string]string), // Initialize here
 		classParents:    make(map[string]string),
+		classLayouts:    make(map[string]*types.StructType),
+		classFields:     make(map[string]map[string]int),
 	}
 
 	// Set target triple for Windows MSVC
@@ -73,7 +78,7 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	block := abortFunc.NewBlock("")
 
 	// Print "abort\n" and exit
-	abortStr := cg.getStringConstant("abort\n")
+	abortStr := cg.getStringConstant("Error: the program was aborted by an abort() function\n")
 	block.NewCall(cg.printf, abortStr)
 	exitFunc := cg.module.NewFunc("exit", types.Void,
 		ir.NewParam("status", types.I32))
@@ -214,8 +219,9 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	}
 
 	// Now generate code for all COOL classes
+	// Now generate code for all COOL classes
 	for _, class := range program.Classes {
-		err := cg.generateClass(class)
+		err := cg.generateClass(class, program) // Pass program here
 		if err != nil {
 			return nil, err
 		}
@@ -271,72 +277,151 @@ func (cg *CodeGenerator) getStringConstant(s string) value.Value {
 	return constant.NewGetElementPtr(global.ContentType, global, zero, zero)
 }
 
-func (cg *CodeGenerator) generateClass(class *ast.Class) error {
+func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) error {
+	// Save previous class
+	prevClass := cg.currentClass
+	cg.currentClass = class.Name.Value
+	defer func() { cg.currentClass = prevClass }()
+
+	// Create class layout first
+	cg.createClassLayout(class.Name.Value, program)
+
 	className := class.Name.Value
+
 	if cg.methods[className] == nil {
 		cg.methods[className] = make(map[string]*ir.Func)
 	}
 
-	// Inherit Object methods if not already defined
-	if className != "Object" {
-		objectMethods := []string{"abort", "type_name", "copy"}
-		for _, methodName := range objectMethods {
-			if _, exists := cg.methods[className][methodName]; !exists {
-				if method, found := cg.methods["Object"][methodName]; found {
-					cg.methods[className][methodName] = method
-				}
-			}
-		}
-	}
-
-	// Use class.Parent instead of class.Inherits
-	if class.Parent != nil {
-		cg.classParents[class.Name.Value] = class.Parent.Value
-	} else {
-		cg.classParents[class.Name.Value] = ""
-	}
-
-	if _, exists := cg.methods[class.Name.Value]; !exists {
-		cg.methods[class.Name.Value] = make(map[string]*ir.Func)
-	}
-
-	// First pass: Register all methods
+	// First pass: Register all attributes and methods
 	for _, feature := range class.Features {
-		if method, ok := feature.(*ast.Method); ok {
-			// Create function parameters
-			params := make([]*ir.Param, 0, len(method.Formals)+1)
+		switch f := feature.(type) {
+		case *ast.Method:
+			// Create function parameters, starting with self
+			params := make([]*ir.Param, 0, len(f.Formals)+1)
 
-			// Add self parameter
+			// Always add self as first parameter
 			selfParam := ir.NewParam("self", types.NewPointer(types.I8))
 			params = append(params, selfParam)
 
-			// Add formal parameters
-			for _, formal := range method.Formals {
+			// Add other parameters
+			for _, formal := range f.Formals {
 				paramType := cg.getLLVMType(formal.Type)
 				param := ir.NewParam(formal.Name.Value, paramType)
 				params = append(params, param)
 			}
 
-			// Create function
-			returnType := cg.getLLVMType(method.Type)
-			fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", class.Name.Value, method.Name.Value),
+			// Create function with self as first parameter
+			var returnType types.Type
+			if f.Name.Value == "init" {
+				// init always returns self (Object pointer)
+				returnType = types.NewPointer(types.I8)
+			} else {
+				returnType = cg.getLLVMType(f.Type)
+			}
+
+			fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", className, f.Name.Value),
 				returnType, params...)
 
-			cg.methods[class.Name.Value][method.Name.Value] = fn
+			// Register the method
+			cg.methods[className][f.Name.Value] = fn
+
+		case *ast.Attribute:
+			// Handle attributes here (will be needed for proper object layout)
+			// For now, we just track their types
+			cg.currentTypes[fmt.Sprintf("%s_%s", className, f.Name.Value)] = f.Type.Value
 		}
 	}
 
 	// Second pass: Generate method bodies
 	for _, feature := range class.Features {
-		switch f := feature.(type) {
-		case *ast.Method:
-			err := cg.generateMethodBody(class.Name.Value, f)
+		if method, ok := feature.(*ast.Method); ok {
+			prevFunc := cg.currentFunc
+			cg.currentFunc = cg.methods[className][method.Name.Value]
+
+			// Special handling for init method
+			var err error
+			if method.Name.Value == "init" {
+				err = cg.generateInitMethodBody(className, method)
+			} else {
+				err = cg.generateMethodBody(className, method)
+			}
 			if err != nil {
 				return err
 			}
+
+			cg.currentFunc = prevFunc
 		}
 	}
 
+	return nil
+}
+
+func (cg *CodeGenerator) generateInitMethodBody(className string, method *ast.Method) error {
+	// Save previous state
+	prevBindings := cg.currentBindings
+	prevTypes := cg.currentTypes
+	cg.currentBindings = make(map[string]value.Value)
+	cg.currentTypes = make(map[string]string)
+
+	fn := cg.methods[className][method.Name.Value]
+	block := fn.NewBlock("")
+
+	// Store parameters in allocas
+	for i, formal := range method.Formals {
+		alloca := block.NewAlloca(fn.Params[i+1].Type())
+		block.NewStore(fn.Params[i+1], alloca)
+		cg.currentBindings[formal.Name.Value] = alloca
+		cg.currentTypes[formal.Name.Value] = formal.Type.Value
+	}
+
+	// Generate the initialization code
+	_, block, err := cg.generateExpression(block, method.Body)
+	if err != nil {
+		return err
+	}
+
+	// Always return self from init
+	if block.Term == nil {
+		block.NewRet(fn.Params[0]) // Return self
+	}
+
+	// Restore previous state
+	cg.currentBindings = prevBindings
+	cg.currentTypes = prevTypes
+	return nil
+}
+
+func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method) error {
+	// Save previous state
+	prevBindings := cg.currentBindings
+	prevTypes := cg.currentTypes
+	cg.currentBindings = make(map[string]value.Value)
+	cg.currentTypes = make(map[string]string)
+
+	fn := cg.methods[className][method.Name.Value]
+	block := fn.NewBlock("")
+
+	// self is always fn.Params[0]
+	// Store other parameters starting from index 1
+	for i, formal := range method.Formals {
+		alloca := block.NewAlloca(fn.Params[i+1].Type())
+		block.NewStore(fn.Params[i+1], alloca)
+		cg.currentBindings[formal.Name.Value] = alloca
+		cg.currentTypes[formal.Name.Value] = formal.Type.Value
+	}
+
+	value, block, err := cg.generateExpression(block, method.Body)
+	if err != nil {
+		return err
+	}
+
+	if block.Term == nil {
+		block.NewRet(value)
+	}
+
+	// Restore previous state
+	cg.currentBindings = prevBindings
+	cg.currentTypes = prevTypes
 	return nil
 }
 
@@ -364,14 +449,14 @@ func (cg *CodeGenerator) lookupMethod(className, methodName string) (*ir.Func, b
 func (cg *CodeGenerator) generateMethodCall(block *ir.Block, object value.Value, className string,
 	methodName string, args []ast.Expression) (value.Value, *ir.Block, error) {
 
-	// Use lookupMethod to climb up the inheritance chain
+	// Look up the method in the class hierarchy
 	method, exists := cg.lookupMethod(className, methodName)
 	if !exists {
 		return nil, block, fmt.Errorf("method %s not found in class %s or its parents", methodName, className)
 	}
 
 	// Generate code for each argument
-	llvmArgs := []value.Value{object}
+	llvmArgs := []value.Value{object} // First argument is always the object itself
 	currentBlock := block
 	for _, arg := range args {
 		argValue, newBlock, err := cg.generateExpression(currentBlock, arg)
@@ -385,38 +470,6 @@ func (cg *CodeGenerator) generateMethodCall(block *ir.Block, object value.Value,
 	// Call the method
 	result := currentBlock.NewCall(method, llvmArgs...)
 	return result, currentBlock, nil
-}
-
-func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method) error {
-	prevBindings := cg.currentBindings
-	prevTypes := cg.currentTypes
-	cg.currentBindings = make(map[string]value.Value)
-	cg.currentTypes = make(map[string]string)
-
-	fn := cg.methods[className][method.Name.Value]
-	cg.currentFunc = fn
-	block := fn.NewBlock("")
-
-	// Index 0 is self's param; skip it in the loop below
-	for i, formal := range method.Formals {
-		alloca := block.NewAlloca(fn.Params[i+1].Type())
-		block.NewStore(fn.Params[i+1], alloca)
-		cg.currentBindings[formal.Name.Value] = alloca
-		// Record the COOL type
-		cg.currentTypes[formal.Name.Value] = formal.Type.Value
-	}
-
-	value, block, err := cg.generateExpression(block, method.Body)
-	if err != nil {
-		return err
-	}
-	if block.Term == nil {
-		block.NewRet(value)
-	}
-
-	cg.currentBindings = prevBindings
-	cg.currentTypes = prevTypes
-	return nil
 }
 
 // generateExpression now returns (value, currentBlock, error)
@@ -445,47 +498,46 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 	case *ast.DynamicDispatch:
 		methodName := e.Method.Value
 
-		// If null or self, handle IO or self calls as before
+		// First, generate code for the object we're dispatching on
+		var objValue value.Value
+		var objType string
+
 		if e.Object == nil || e.Object.TokenLiteral() == "self" {
-			if methodName == "out_string" || methodName == "out_int" ||
-				methodName == "in_string" || methodName == "in_int" {
-				// ...existing IO code...
+			// If object is nil or self, use current function's self parameter
+			if cg.currentFunc == nil {
+				return nil, block, fmt.Errorf("dispatch on self outside method context")
 			}
-			// Regular method call on self
-			return cg.generateMethodCall(block,
-				constant.NewNull(types.NewPointer(types.I8)),
-				"Main", // or the current class if we stored it
-				methodName,
-				e.Arguments)
-		}
+			objValue = cg.currentFunc.Params[0]
+			// Use the current class type if we're in a method
+			objType = strings.Split(cg.currentFunc.Name(), "_")[0]
+		} else {
+			// Generate code for the object expression
+			var newBlock *ir.Block
+			var err error
+			objValue, newBlock, err = cg.generateExpression(block, e.Object)
+			if err != nil {
+				return nil, block, err
+			}
+			block = newBlock
 
-		// Otherwise, find the object's binding name and deduce its type
-		objIdentifier, ok := e.Object.(*ast.ObjectIdentifier)
-		if !ok {
-			return nil, block, fmt.Errorf("unsupported object in dispatch")
-		}
-
-		// Generate code for the object
-		objValue, newBlock, err := cg.generateExpression(block, e.Object)
-		if err != nil {
-			return nil, block, err
-		}
-		block = newBlock
-
-		// Find matching entry in currentTypes
-		var actualType string
-		for name, t := range cg.currentTypes {
-			if strings.HasPrefix(name, objIdentifier.Value) {
-				actualType = t
-				break
+			// Determine the type of the object
+			switch obj := e.Object.(type) {
+			case *ast.ObjectIdentifier:
+				// Look up the type in our current types map
+				var exists bool
+				objType, exists = cg.currentTypes[obj.Value]
+				if !exists {
+					return nil, block, fmt.Errorf("undefined variable: %s", obj.Value)
+				}
+			case *ast.NewExpression:
+				objType = obj.Type.Value
+			default:
+				return nil, block, fmt.Errorf("unsupported dispatch object type: %T", e.Object)
 			}
 		}
-		if actualType == "" {
-			actualType = "Main" // fallback if nothing found
-		}
 
-		// Now dispatch on the actual type
-		return cg.generateMethodCall(block, objValue, actualType, methodName, e.Arguments)
+		// Now generate the method call with the correct object and type
+		return cg.generateMethodCall(block, objValue, objType, methodName, e.Arguments)
 	case *ast.BlockExpression:
 		return cg.generateBlock(block, e)
 	case *ast.LetExpression:
@@ -640,31 +692,7 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		// Return void/null as the result of the loop
 		return constant.NewNull(types.NewPointer(types.I8)), exitBlock, nil
 	case *ast.Assignment:
-		// Look up the variable in current bindings
-		var alloca value.Value
-		found := false
-		for name, a := range cg.currentBindings {
-			if strings.HasPrefix(name, e.Left.(*ast.ObjectIdentifier).Value) {
-				alloca = a
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, block, fmt.Errorf("undefined variable: %s", e.Left.(*ast.ObjectIdentifier).Value)
-		}
-
-		// Generate code for the value expression
-		value, newBlock, err := cg.generateExpression(block, e.Value)
-		if err != nil {
-			return nil, block, err
-		}
-
-		// Store the new value
-		newBlock.NewStore(value, alloca)
-
-		// Return the value that was assigned
-		return value, newBlock, nil
+		return cg.generateAssignment(block, e)
 	case *ast.NewExpression:
 		// Placeholder for new object creation
 		newObj := constant.NewNull(types.NewPointer(types.I8))
@@ -791,6 +819,11 @@ func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.Dynamic
 }
 
 func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) error {
+	// Save previous state
+	prevClass := cg.currentClass
+	cg.currentClass = className
+	defer func() { cg.currentClass = prevClass }()
+
 	// Save the previous bindings
 	prevBindings := cg.currentBindings
 	cg.currentBindings = make(map[string]value.Value)
@@ -866,4 +899,79 @@ func (cg *CodeGenerator) getLLVMType(typeId *ast.TypeIdentifier) types.Type {
 		// For now, treat all other types as opaque pointers
 		return types.NewPointer(types.I8)
 	}
+}
+
+func (cg *CodeGenerator) createClassLayout(className string, program *ast.Program) *types.StructType {
+	if layout, exists := cg.classLayouts[className]; exists {
+		return layout
+	}
+
+	// Get parent class layout first
+	var fields []types.Type
+	if parent, exists := cg.classParents[className]; exists && parent != "" {
+		parentLayout := cg.createClassLayout(parent, program)
+		fields = append(fields, parentLayout.Fields...)
+	}
+
+	// Add vtable pointer (for methods)
+	fields = append(fields, types.NewPointer(types.I8))
+
+	// Create field map if it doesn't exist
+	if cg.classFields[className] == nil {
+		cg.classFields[className] = make(map[string]int)
+	}
+
+	// Add class's own fields
+	for _, class := range program.Classes {
+		if class.Name.Value == className {
+			for _, f := range class.Features {
+				if attr, ok := f.(*ast.Attribute); ok {
+					cg.classFields[className][attr.Name.Value] = len(fields)
+					fields = append(fields, cg.getLLVMType(attr.Type))
+				}
+			}
+			break
+		}
+	}
+
+	layout := types.NewStruct(fields...)
+	cg.classLayouts[className] = layout
+	return layout
+}
+
+// Now generateAssignment can use cg.currentClass
+func (cg *CodeGenerator) generateAssignment(block *ir.Block, assign *ast.Assignment) (value.Value, *ir.Block, error) {
+	if obj, ok := assign.Left.(*ast.ObjectIdentifier); ok {
+		// First check if this is a field access
+		if fieldIndex, exists := cg.classFields[cg.currentClass][obj.Value]; exists {
+			self := cg.currentFunc.Params[0] // get self parameter
+			// Cast self to struct pointer
+			structPtr := block.NewBitCast(self, types.NewPointer(cg.classLayouts[cg.currentClass]))
+			// Generate field pointer
+			fieldPtr := block.NewGetElementPtr(cg.classLayouts[cg.currentClass], structPtr,
+				constant.NewInt(types.I32, 0),
+				constant.NewInt(types.I32, int64(fieldIndex)))
+
+			// Generate value and store it
+			value, newBlock, err := cg.generateExpression(block, assign.Value)
+			if err != nil {
+				return nil, block, err
+			}
+			newBlock.NewStore(value, fieldPtr)
+			return value, newBlock, nil
+		}
+
+		// If not a field, check local variables
+		if alloca, exists := cg.currentBindings[obj.Value]; exists {
+			// Generate code for the value expression
+			value, newBlock, err := cg.generateExpression(block, assign.Value)
+			if err != nil {
+				return nil, block, err
+			}
+			// Store the new value
+			newBlock.NewStore(value, alloca)
+			return value, newBlock, nil
+		}
+	}
+	return nil, block, fmt.Errorf("undefined variable or field: %v", assign.Left)
 }

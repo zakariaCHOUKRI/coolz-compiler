@@ -1,16 +1,17 @@
 target triple = "x86_64-pc-windows-msvc19.43.34808"
 
-@str.0 = global [7 x i8] c"abort\0A\00"
+@str.0 = global [55 x i8] c"Error: the program was aborted by an abort() function\0A\00"
 @str.1 = global [7 x i8] c"Object\00"
 @str.2 = global [3 x i8] c"%s\00"
 @str.3 = global [5 x i8] c"%lld\00"
 @str.4 = global [9 x i8] c"%255[^\0A]\00"
 @str.5 = global [4 x i8] c"%*c\00"
-@str.6 = global [46 x i8] c"Enter an integer greater-than or equal-to 0: \00"
-@str.7 = global [50 x i8] c"ERROR: Number must be greater-than or equal-to 0\0A\00"
-@str.8 = global [18 x i8] c"The factorial of \00"
-@str.9 = global [5 x i8] c" is \00"
-@str.10 = global [2 x i8] c"\0A\00"
+@str.6 = global [2 x i8] c"\0A\00"
+@str.7 = global [9 x i8] c"Let's go\00"
+@str.8 = global [2 x i8] c"1\00"
+@str.9 = global [2 x i8] c"2\00"
+@str.10 = global [18 x i8] c"this should print\00"
+@str.11 = global [22 x i8] c"this should not print\00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -20,7 +21,7 @@ declare i8* @memset(i8* %str, i32 %c, i64 %n)
 
 define i8* @Object_abort(i8* %self) {
 0:
-	%1 = call i32 (i8*, ...) @printf(i8* getelementptr ([7 x i8], [7 x i8]* @str.0, i32 0, i32 0))
+	%1 = call i32 (i8*, ...) @printf(i8* getelementptr ([55 x i8], [55 x i8]* @str.0, i32 0, i32 0))
 	call void @exit(i32 1)
 	unreachable
 }
@@ -78,58 +79,44 @@ define i64 @IO_in_int(i8* %self) {
 	ret i64 %4
 }
 
-define i8* @Main_main(i8* %self) {
+define i8* @Parent_print(i8* %self, i8* %x) {
 0:
-	%1 = call i8* @IO_out_string(i8* null, i8* getelementptr ([46 x i8], [46 x i8]* @str.6, i32 0, i32 0))
-	%2 = alloca i64
-	%3 = call i64 @IO_in_int(i8* null)
-	store i64 %3, i64* %2
-	%4 = load i64, i64* %2
-	%5 = icmp slt i64 %4, 0
-	br i1 %5, label %if_then_1, label %if_else_1
-
-if_then_1:
-	%6 = call i8* @IO_out_string(i8* null, i8* getelementptr ([50 x i8], [50 x i8]* @str.7, i32 0, i32 0))
-	br label %if_merge_1
-
-if_else_1:
-	%7 = call i8* @IO_out_string(i8* null, i8* getelementptr ([18 x i8], [18 x i8]* @str.8, i32 0, i32 0))
-	%8 = load i64, i64* %2
-	%9 = call i8* @IO_out_int(i8* null, i64 %8)
-	%10 = call i8* @IO_out_string(i8* null, i8* getelementptr ([5 x i8], [5 x i8]* @str.9, i32 0, i32 0))
-	%11 = load i64, i64* %2
-	%12 = call i64 @Main_factorial(i8* null, i64 %11)
-	%13 = call i8* @IO_out_int(i8* null, i64 %12)
-	%14 = call i8* @IO_out_string(i8* null, i8* getelementptr ([2 x i8], [2 x i8]* @str.10, i32 0, i32 0))
-	br label %if_merge_1
-
-if_merge_1:
-	%15 = phi i8* [ %6, %if_then_1 ], [ %14, %if_else_1 ]
-	ret i8* %15
+	%1 = alloca i8*
+	store i8* %x, i8** %1
+	%2 = load i8*, i8** %1
+	%3 = call i8* @IO_out_string(i8* %self, i8* %2)
+	%4 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.6, i32 0, i32 0))
+	ret i8* %4
 }
 
-define i64 @Main_factorial(i8* %self, i64 %num) {
+define i8* @Child_print2(i8* %self, i8* %x, i8* %y) {
 0:
-	%1 = alloca i64
-	store i64 %num, i64* %1
-	%2 = load i64, i64* %1
-	%3 = icmp eq i64 %2, 0
-	br i1 %3, label %if_then_2, label %if_else_2
+	%1 = alloca i8*
+	store i8* %x, i8** %1
+	%2 = alloca i8*
+	store i8* %y, i8** %2
+	%3 = load i8*, i8** %1
+	%4 = call i8* @Parent_print(i8* %self, i8* %3)
+	%5 = load i8*, i8** %2
+	%6 = call i8* @Parent_print(i8* %self, i8* %5)
+	ret i8* %6
+}
 
-if_then_2:
-	br label %if_merge_2
-
-if_else_2:
-	%4 = load i64, i64* %1
-	%5 = load i64, i64* %1
-	%6 = sub i64 %5, 1
-	%7 = call i64 @Main_factorial(i8* null, i64 %6)
-	%8 = mul i64 %4, %7
-	br label %if_merge_2
-
-if_merge_2:
-	%9 = phi i64 [ 1, %if_then_2 ], [ %8, %if_else_2 ]
-	ret i64 %9
+define i8* @Main_main(i8* %self) {
+0:
+	%1 = alloca i8*
+	store i8* null, i8** %1
+	%2 = load i8*, i8** %1
+	%3 = call i8* @Parent_print(i8* %2, i8* getelementptr ([9 x i8], [9 x i8]* @str.7, i32 0, i32 0))
+	%4 = load i8*, i8** %1
+	%5 = load i8*, i8** %1
+	%6 = call i8* @Object_type_name(i8* %5)
+	%7 = call i8* @Parent_print(i8* %4, i8* %6)
+	%8 = call i8* @Child_print2(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.8, i32 0, i32 0), i8* getelementptr ([2 x i8], [2 x i8]* @str.9, i32 0, i32 0))
+	%9 = call i8* @Parent_print(i8* %self, i8* getelementptr ([18 x i8], [18 x i8]* @str.10, i32 0, i32 0))
+	%10 = call i8* @Object_abort(i8* %self)
+	%11 = call i8* @Parent_print(i8* %self, i8* getelementptr ([22 x i8], [22 x i8]* @str.11, i32 0, i32 0))
+	ret i8* %11
 }
 
 define i32 @main() {
