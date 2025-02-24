@@ -21,6 +21,8 @@ type CodeGenerator struct {
 	scanf           *ir.Func
 	methods         map[string]map[string]*ir.Func
 	memset          *ir.Func
+	malloc          *ir.Func
+	memcpy          *ir.Func
 	currentBindings map[string]value.Value
 	currentTypes    map[string]string // Add this map to store variable -> COOL type
 	blockCounter    int
@@ -30,14 +32,14 @@ type CodeGenerator struct {
 	currentClass    string
 }
 
-// New creates a new code generator
+// In the New() function, add malloc declaration:
 func New() *CodeGenerator {
 	cg := &CodeGenerator{
 		module:          ir.NewModule(),
 		stringConstants: make(map[string]*ir.Global),
 		methods:         make(map[string]map[string]*ir.Func),
 		currentBindings: make(map[string]value.Value),
-		currentTypes:    make(map[string]string), // Initialize here
+		currentTypes:    make(map[string]string),
 		classParents:    make(map[string]string),
 		classLayouts:    make(map[string]*types.StructType),
 		classFields:     make(map[string]map[string]int),
@@ -46,22 +48,30 @@ func New() *CodeGenerator {
 	// Set target triple for Windows MSVC
 	cg.module.TargetTriple = "x86_64-pc-windows-msvc19.43.34808"
 
-	// Declare external printf function
+	// Declare external functions
 	printfType := types.NewPointer(types.I8)
 	cg.printf = cg.module.NewFunc("printf", types.I32, ir.NewParam("format", printfType))
 	cg.printf.Sig.Variadic = true
 
-	// Declare external scanf function
 	scanfType := types.NewPointer(types.I8)
 	cg.scanf = cg.module.NewFunc("scanf", types.I32, ir.NewParam("format", scanfType))
 	cg.scanf.Sig.Variadic = true
 
-	// Declare external memset function
 	memsetType := types.NewPointer(types.I8)
 	cg.memset = cg.module.NewFunc("memset", types.NewPointer(types.I8),
 		ir.NewParam("str", memsetType),
 		ir.NewParam("c", types.I32),
 		ir.NewParam("n", types.I64))
+
+	// Add malloc declaration
+	cg.malloc = cg.module.NewFunc("malloc", types.NewPointer(types.I8),
+		ir.NewParam("size", types.I64))
+
+	// Add memcpy declaration
+	cg.memcpy = cg.module.NewFunc("memcpy", types.NewPointer(types.I8),
+		ir.NewParam("dest", types.NewPointer(types.I8)),
+		ir.NewParam("src", types.NewPointer(types.I8)),
+		ir.NewParam("size", types.I64))
 
 	return cg
 }
@@ -90,20 +100,24 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	typeNameFunc := cg.module.NewFunc("Object_type_name", types.NewPointer(types.I8),
 		ir.NewParam("self", types.NewPointer(types.I8)))
 	block = typeNameFunc.NewBlock("")
-
-	// For now, just return "Object" string
-	objectStr := cg.getStringConstant("Object")
-	block.NewRet(objectStr)
+	// Return "Object" for now (child classes can override for correct name)
+	block.NewRet(cg.getStringConstant("Object"))
 	cg.methods["Object"]["type_name"] = typeNameFunc
 
 	// Add copy() method
 	copyFunc := cg.module.NewFunc("Object_copy", types.NewPointer(types.I8),
 		ir.NewParam("self", types.NewPointer(types.I8)))
 	block = copyFunc.NewBlock("")
-
-	// For basic implementation, just return self
-	// TODO: Implement proper shallow copy when object layout is defined
-	block.NewRet(copyFunc.Params[0])
+	// Create a shallow copy
+	layout := cg.classLayouts["Object"] // or any needed layout
+	// Rough size calculation (not strictly correct for all alignments, but illustrative)
+	cg.classLayouts["Object"] = types.NewStruct(
+		types.NewPointer(types.I8), // vtable pointer
+	)
+	structSize := cg.calculateStructSize(layout)
+	newObj := block.NewCall(cg.malloc, constant.NewInt(types.I64, structSize))
+	block.NewCall(cg.memcpy, newObj, copyFunc.Params[0], constant.NewInt(types.I64, structSize))
+	block.NewRet(newObj)
 	cg.methods["Object"]["copy"] = copyFunc
 
 	// Initialize IO class methods
@@ -170,16 +184,10 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 
 	// Allocate permanent storage for the string (+1 for null terminator)
 	size := block.NewAdd(length, constant.NewInt(types.I64, 1))
-	malloc := cg.module.NewFunc("malloc", types.NewPointer(types.I8),
-		ir.NewParam("size", types.I64))
-	permanent := block.NewCall(malloc, size)
+	permanent := block.NewCall(cg.malloc, size)
 
 	// Copy the string to permanent storage
-	memcpy := cg.module.NewFunc("memcpy", types.NewPointer(types.I8),
-		ir.NewParam("dest", types.NewPointer(types.I8)),
-		ir.NewParam("src", types.NewPointer(types.I8)),
-		ir.NewParam("size", types.I64))
-	block.NewCall(memcpy, permanent, strPtr, size)
+	block.NewCall(cg.memcpy, permanent, strPtr, size)
 
 	// Return the permanent string
 	block.NewRet(permanent)
@@ -259,6 +267,29 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	block.NewRet(constant.NewInt(types.I32, 0))
 
 	return cg.module, nil
+}
+
+func (cg *CodeGenerator) calculateStructSize(layout *types.StructType) int64 {
+	if layout == nil {
+		return 8 // Return minimum size for nil layouts (pointer size)
+	}
+
+	structSize := int64(0)
+	for _, field := range layout.Fields {
+		switch ft := field.(type) {
+		case *types.IntType:
+			structSize += int64(ft.BitSize) / 8
+		case *types.PointerType:
+			structSize += 8
+		case *types.ArrayType:
+			structSize += int64(ft.Len)
+		case *types.StructType:
+			structSize += cg.calculateStructSize(ft)
+		default:
+			structSize += 8
+		}
+	}
+	return ((structSize + 7) / 8) * 8
 }
 
 // getStringConstant creates or retrieves a global string constant

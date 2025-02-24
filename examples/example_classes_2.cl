@@ -26,6 +26,7 @@ class Main inherits Child{
 
             print2("1", "2");
             self.print("this should print");
+
             abort();
             print("this should not print");
         }

@@ -19,6 +19,10 @@ declare i32 @scanf(i8* %format, ...)
 
 declare i8* @memset(i8* %str, i32 %c, i64 %n)
 
+declare i8* @malloc(i64 %size)
+
+declare i8* @memcpy(i8* %dest, i8* %src, i64 %size)
+
 define i8* @Object_abort(i8* %self) {
 0:
 	%1 = call i32 (i8*, ...) @printf(i8* getelementptr ([55 x i8], [55 x i8]* @str.0, i32 0, i32 0))
@@ -35,7 +39,9 @@ define i8* @Object_type_name(i8* %self) {
 
 define i8* @Object_copy(i8* %self) {
 0:
-	ret i8* %self
+	%1 = call i8* @malloc(i64 8)
+	%2 = call i8* @memcpy(i8* %1, i8* %self, i64 8)
+	ret i8* %1
 }
 
 define i8* @IO_out_string(i8* %self, i8* %x) {
@@ -65,10 +71,6 @@ define i8* @IO_in_string(i8* %self) {
 }
 
 declare i64 @strlen(i8* %str)
-
-declare i8* @malloc(i64 %size)
-
-declare i8* @memcpy(i8* %dest, i8* %src, i64 %size)
 
 define i64 @IO_in_int(i8* %self) {
 0:
