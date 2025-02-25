@@ -228,6 +228,64 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	callResult := block.NewCall(cg.strlen, lengthFunc.Params[0])
 	block.NewRet(callResult)
 
+	// Create substr() method
+	substrFunc := cg.module.NewFunc("String_substr", types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)),
+		ir.NewParam("i", types.I64),
+		ir.NewParam("l", types.I64))
+	cg.methods["String"]["substr"] = substrFunc
+
+	block = substrFunc.NewBlock("")
+
+	// Get string length for bounds checking
+	strLen := block.NewCall(cg.strlen, substrFunc.Params[0])
+
+	// Check if i is negative
+	iNegative := block.NewICmp(enum.IPredSLT, substrFunc.Params[1], constant.NewInt(types.I64, 0))
+
+	// Check if i + l is greater than string length
+	iSum := block.NewAdd(substrFunc.Params[1], substrFunc.Params[2])
+	outOfBounds := block.NewICmp(enum.IPredSGT, iSum, strLen)
+
+	// Check if l is negative
+	lNegative := block.NewICmp(enum.IPredSLT, substrFunc.Params[2], constant.NewInt(types.I64, 0))
+
+	// Combine all error conditions
+	errorCond := block.NewOr(iNegative, outOfBounds)
+	errorCond = block.NewOr(errorCond, lNegative)
+
+	// Create blocks for error and success paths
+	errorBlock := substrFunc.NewBlock("error")
+	successBlock := substrFunc.NewBlock("success")
+
+	// Branch based on error condition
+	block.NewCondBr(errorCond, errorBlock, successBlock)
+
+	// Error block: print error message and abort
+	errorBlock.NewCall(cg.printf,
+		cg.getStringConstant("Error: substr out of range\n"))
+	abortFunc = cg.methods["Object"]["abort"] // Changed from := to =
+	errorBlock.NewCall(abortFunc, substrFunc.Params[0])
+	errorBlock.NewUnreachable()
+
+	// Success block: create the substring
+	// Get pointer to start of substring
+	startPtr := successBlock.NewGetElementPtr(types.I8, substrFunc.Params[0], substrFunc.Params[1])
+
+	// Allocate memory for new string (+1 for null terminator)
+	substrSize := successBlock.NewAdd(substrFunc.Params[2], constant.NewInt(types.I64, 1))
+	newStr := successBlock.NewCall(cg.malloc, substrSize)
+
+	// Copy the substring
+	successBlock.NewCall(cg.memcpy, newStr, startPtr, substrFunc.Params[2])
+
+	// Add null terminator
+	endPtr := successBlock.NewGetElementPtr(types.I8, newStr, substrFunc.Params[2])
+	successBlock.NewStore(constant.NewInt(types.I8, 0), endPtr)
+
+	// Return the new string
+	successBlock.NewRet(newStr)
+
 	// Initialize class inheritance relationships first
 	for _, class := range program.Classes {
 		if class.Parent != nil {

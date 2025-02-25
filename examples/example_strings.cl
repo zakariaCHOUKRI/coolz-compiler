@@ -23,6 +23,12 @@ class Main inherits Printer {
                 print("\" ");
                 print("is: ");
                 out_int(x.length());
+                println("");
+            };
+
+            let y : String <- "0123456789" in {
+                println("3 to 7:");
+                println(y.substr(3, 7-3+1));
             };
         }
     };
