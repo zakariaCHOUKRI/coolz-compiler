@@ -7,17 +7,12 @@ target triple = "x86_64-pc-windows-msvc19.43.34808"
 @str.4 = global [9 x i8] c"%255[^\0A]\00"
 @str.5 = global [4 x i8] c"%*c\00"
 @str.6 = global [28 x i8] c"Error: substr out of range\0A\00"
-@str.7 = global [8 x i8] c"Printer\00"
-@str.8 = global [2 x i8] c"\0A\00"
-@str.9 = global [5 x i8] c"Main\00"
-@str.10 = global [15 x i8] c"Hello everyone\00"
-@str.11 = global [15 x i8] c"the length of:\00"
-@str.12 = global [2 x i8] c"\22\00"
-@str.13 = global [3 x i8] c"\22 \00"
-@str.14 = global [5 x i8] c"is: \00"
-@str.15 = global [1 x i8] c"\00"
-@str.16 = global [11 x i8] c"0123456789\00"
-@str.17 = global [8 x i8] c"3 to 7:\00"
+@str.7 = global [5 x i8] c"Main\00"
+@str.8 = global [25 x i8] c"Please enter your name: \00"
+@str.9 = global [15 x i8] c"Your name is: \00"
+@str.10 = global [2 x i8] c"\0A\00"
+@str.11 = global [24 x i8] c"Please enter a number: \00"
+@str.12 = global [17 x i8] c"Your number is: \00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -70,19 +65,20 @@ define i8* @IO_in_string(i8* %self) {
 	%2 = getelementptr [256 x i8], [256 x i8]* %1, i32 0, i32 0
 	%3 = call i8* @memset(i8* %2, i32 0, i64 256)
 	%4 = call i32 (i8*, ...) @scanf(i8* getelementptr ([9 x i8], [9 x i8]* @str.4, i32 0, i32 0), [256 x i8]* %1)
-	%5 = getelementptr [256 x i8], [256 x i8]* %1, i32 0, i32 0
-	%6 = call i64 @strlen(i8* %5)
-	%7 = add i64 %6, 1
-	%8 = call i8* @malloc(i64 %7)
-	%9 = call i8* @memcpy(i8* %8, i8* %5, i64 %7)
-	ret i8* %8
+	%5 = call i32 (i8*, ...) @scanf(i8* getelementptr ([4 x i8], [4 x i8]* @str.5, i32 0, i32 0))
+	%6 = getelementptr [256 x i8], [256 x i8]* %1, i32 0, i32 0
+	%7 = call i64 @strlen(i8* %6)
+	%8 = add i64 %7, 1
+	%9 = call i8* @malloc(i64 %8)
+	%10 = call i8* @memcpy(i8* %9, i8* %6, i64 %8)
+	ret i8* %9
 }
 
 define i64 @IO_in_int(i8* %self) {
 0:
 	%1 = alloca i64
 	%2 = call i32 (i8*, ...) @scanf([5 x i8]* @str.3, i64* %1)
-	%3 = call i32 (i8*, ...) @scanf(i8* getelementptr ([4 x i8], [4 x i8]* @str.5, i32 0, i32 0))
+	%3 = call i32 (i8*, ...) @scanf([4 x i8]* @str.5)
 	%4 = load i64, i64* %1
 	ret i64 %4
 }
@@ -119,58 +115,60 @@ success:
 	ret i8* %12
 }
 
-define i8* @Printer_print(i8* %self, i8* %x) {
+define i8* @String_concat(i8* %self, i8* %s) {
 0:
-	%1 = alloca i8*
-	store i8* %x, i8** %1
-	%2 = load i8*, i8** %1
-	%3 = call i8* @IO_out_string(i8* %self, i8* %2)
-	ret i8* %3
-}
-
-define i8* @Printer_println(i8* %self, i8* %x) {
-0:
-	%1 = alloca i8*
-	store i8* %x, i8** %1
-	%2 = load i8*, i8** %1
-	%3 = call i8* @Printer_print(i8* %self, i8* %2)
-	%4 = call i8* @Printer_print(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.8, i32 0, i32 0))
-	ret i8* %4
-}
-
-define i8* @Printer_type_name(i8* %self) {
-0:
-	ret i8* getelementptr ([8 x i8], [8 x i8]* @str.7, i32 0, i32 0)
+	%1 = call i64 @strlen(i8* %self)
+	%2 = call i64 @strlen(i8* %s)
+	%3 = add i64 %1, %2
+	%4 = add i64 %3, 1
+	%5 = call i8* @malloc(i64 %4)
+	%6 = call i8* @memcpy(i8* %5, i8* %self, i64 %1)
+	%7 = getelementptr i8, i8* %5, i64 %1
+	%8 = add i64 %2, 1
+	%9 = call i8* @memcpy(i8* %7, i8* %s, i64 %8)
+	ret i8* %5
 }
 
 define i8* @Main_main(i8* %self) {
 0:
-	%1 = alloca i8*
-	store i8* getelementptr ([15 x i8], [15 x i8]* @str.10, i32 0, i32 0), i8** %1
-	%2 = call i8* @Printer_println(i8* %self, i8* getelementptr ([15 x i8], [15 x i8]* @str.11, i32 0, i32 0))
-	%3 = call i8* @Printer_print(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.12, i32 0, i32 0))
-	%4 = load i8*, i8** %1
-	%5 = call i8* @Printer_print(i8* %self, i8* %4)
-	%6 = call i8* @Printer_print(i8* %self, i8* getelementptr ([3 x i8], [3 x i8]* @str.13, i32 0, i32 0))
-	%7 = call i8* @Printer_print(i8* %self, i8* getelementptr ([5 x i8], [5 x i8]* @str.14, i32 0, i32 0))
-	%8 = load i8*, i8** %1
-	%9 = call i64 @String_length(i8* %8)
-	%10 = call i8* @IO_out_int(i8* %self, i64 %9)
-	%11 = call i8* @Printer_println(i8* %self, i8* getelementptr ([1 x i8], [1 x i8]* @str.15, i32 0, i32 0))
-	%12 = alloca i8*
-	store i8* getelementptr ([11 x i8], [11 x i8]* @str.16, i32 0, i32 0), i8** %12
-	%13 = call i8* @Printer_println(i8* %self, i8* getelementptr ([8 x i8], [8 x i8]* @str.17, i32 0, i32 0))
-	%14 = load i8*, i8** %12
-	%15 = sub i64 7, 3
-	%16 = add i64 %15, 1
-	%17 = call i8* @String_substr(i8* %14, i64 3, i64 %16)
-	%18 = call i8* @Printer_println(i8* %self, i8* %17)
-	ret i8* %18
+	%1 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([25 x i8], [25 x i8]* @str.8, i32 0, i32 0))
+	%2 = alloca i8*
+	%3 = call i8* @IO_in_string(i8* %self)
+	store i8* %3, i8** %2
+	%4 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([15 x i8], [15 x i8]* @str.9, i32 0, i32 0))
+	%5 = load i8*, i8** %2
+	%6 = call i8* @IO_out_string(i8* %self, i8* %5)
+	%7 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.10, i32 0, i32 0))
+	%8 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([24 x i8], [24 x i8]* @str.11, i32 0, i32 0))
+	%9 = alloca i64
+	%10 = call i64 @IO_in_int(i8* %self)
+	store i64 %10, i64* %9
+	%11 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([17 x i8], [17 x i8]* @str.12, i32 0, i32 0))
+	%12 = load i64, i64* %9
+	%13 = call i8* @IO_out_int(i8* %self, i64 %12)
+	%14 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.10)
+	%15 = call i8* @IO_out_string(i8* %self, [24 x i8]* @str.11)
+	%16 = alloca i64
+	%17 = call i64 @IO_in_int(i8* %self)
+	store i64 %17, i64* %16
+	%18 = call i8* @IO_out_string(i8* %self, [17 x i8]* @str.12)
+	%19 = load i64, i64* %16
+	%20 = call i8* @IO_out_int(i8* %self, i64 %19)
+	%21 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.10)
+	%22 = call i8* @IO_out_string(i8* %self, [25 x i8]* @str.8)
+	%23 = alloca i8*
+	%24 = call i8* @IO_in_string(i8* %self)
+	store i8* %24, i8** %23
+	%25 = call i8* @IO_out_string(i8* %self, [15 x i8]* @str.9)
+	%26 = load i8*, i8** %23
+	%27 = call i8* @IO_out_string(i8* %self, i8* %26)
+	%28 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.10)
+	ret i8* %28
 }
 
 define i8* @Main_type_name(i8* %self) {
 0:
-	ret i8* getelementptr ([5 x i8], [5 x i8]* @str.9, i32 0, i32 0)
+	ret i8* getelementptr ([5 x i8], [5 x i8]* @str.7, i32 0, i32 0)
 }
 
 define i32 @main() {

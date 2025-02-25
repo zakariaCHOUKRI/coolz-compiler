@@ -179,6 +179,9 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Read the string
 	block.NewCall(cg.scanf, strFormat, buffer)
 
+	// Clear the newline from input buffer
+	block.NewCall(cg.scanf, cg.getStringConstant("%*c"))
+
 	strPtr = block.NewGetElementPtr(types.NewArray(256, types.I8), buffer, zero, zero)
 	length := block.NewCall(cg.strlen, strPtr)
 
@@ -285,6 +288,38 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 
 	// Return the new string
 	successBlock.NewRet(newStr)
+
+	// Create concat() method
+	concatFunc := cg.module.NewFunc("String_concat", types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)),
+		ir.NewParam("s", types.NewPointer(types.I8)))
+	cg.methods["String"]["concat"] = concatFunc
+
+	block = concatFunc.NewBlock("")
+
+	// Get lengths of both strings
+	selfLen := block.NewCall(cg.strlen, concatFunc.Params[0])
+	sLen := block.NewCall(cg.strlen, concatFunc.Params[1])
+
+	// Calculate total length needed (+1 for null terminator)
+	totalLen := block.NewAdd(selfLen, sLen)
+	allocSize := block.NewAdd(totalLen, constant.NewInt(types.I64, 1))
+
+	// Allocate memory for new string
+	newStr2 := block.NewCall(cg.malloc, allocSize)
+
+	// Copy first string (self)
+	block.NewCall(cg.memcpy, newStr2, concatFunc.Params[0], selfLen)
+
+	// Calculate pointer to where second string should go
+	secondStrPtr := block.NewGetElementPtr(types.I8, newStr2, selfLen)
+
+	// Copy second string (including null terminator)
+	sLenPlusOne := block.NewAdd(sLen, constant.NewInt(types.I64, 1))
+	block.NewCall(cg.memcpy, secondStrPtr, concatFunc.Params[1], sLenPlusOne)
+
+	// Return the concatenated string
+	block.NewRet(newStr2)
 
 	// Initialize class inheritance relationships first
 	for _, class := range program.Classes {
