@@ -30,6 +30,7 @@ type CodeGenerator struct {
 	classLayouts    map[string]*types.StructType
 	classFields     map[string]map[string]int // Maps class->field->index
 	currentClass    string
+	strlen          *ir.Func
 }
 
 // In the New() function, add malloc declaration:
@@ -72,6 +73,9 @@ func New() *CodeGenerator {
 		ir.NewParam("dest", types.NewPointer(types.I8)),
 		ir.NewParam("src", types.NewPointer(types.I8)),
 		ir.NewParam("size", types.I64))
+
+	cg.strlen = cg.module.NewFunc("strlen", types.I64,
+		ir.NewParam("str", types.NewPointer(types.I8)))
 
 	return cg
 }
@@ -175,12 +179,8 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Read the string
 	block.NewCall(cg.scanf, strFormat, buffer)
 
-	// Get the string length using strlen
-	strlen := cg.module.NewFunc("strlen", types.I64,
-		ir.NewParam("str", types.NewPointer(types.I8)))
-
 	strPtr = block.NewGetElementPtr(types.NewArray(256, types.I8), buffer, zero, zero)
-	length := block.NewCall(strlen, strPtr)
+	length := block.NewCall(cg.strlen, strPtr)
 
 	// Allocate permanent storage for the string (+1 for null terminator)
 	size := block.NewAdd(length, constant.NewInt(types.I64, 1))
@@ -214,6 +214,19 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Load and return the integer
 	result := block.NewLoad(types.I64, intVar)
 	block.NewRet(result)
+
+	// Initialize String class methods
+	cg.classParents["String"] = "Object" // String inherits from Object
+	cg.methods["String"] = make(map[string]*ir.Func)
+
+	// Create length() method
+	lengthFunc := cg.module.NewFunc("String_length", types.I64,
+		ir.NewParam("self", types.NewPointer(types.I8)))
+	cg.methods["String"]["length"] = lengthFunc
+
+	block = lengthFunc.NewBlock("")
+	callResult := block.NewCall(cg.strlen, lengthFunc.Params[0])
+	block.NewRet(callResult)
 
 	// Initialize class inheritance relationships first
 	for _, class := range program.Classes {
@@ -818,118 +831,6 @@ func (cg *CodeGenerator) generateLet(block *ir.Block, letExpr *ast.LetExpression
 	cg.currentTypes = prevTypes
 
 	return result, newBlock, err
-}
-
-func (cg *CodeGenerator) generateDispatch(block *ir.Block, dispatch *ast.DynamicDispatch) (value.Value, *ir.Block, error) {
-	currentBlock := block
-
-	// Handle all IO methods
-	methodName := dispatch.Method.Value
-	if methodName != "out_string" && methodName != "out_int" &&
-		methodName != "in_string" && methodName != "in_int" {
-		return nil, currentBlock, fmt.Errorf("unsupported method: %s", methodName)
-	}
-
-	// Generate code for arguments
-	args := make([]value.Value, 0, len(dispatch.Arguments)+1)
-
-	// Add self parameter
-	args = append(args, constant.NewNull(types.NewPointer(types.I8)))
-
-	// For output methods, process the argument
-	if methodName == "out_string" || methodName == "out_int" {
-		if len(dispatch.Arguments) != 1 {
-			return nil, currentBlock, fmt.Errorf("expected 1 argument for %s, got %d", methodName, len(dispatch.Arguments))
-		}
-
-		arg, newBlock, err := cg.generateExpression(currentBlock, dispatch.Arguments[0])
-		if err != nil {
-			return nil, currentBlock, err
-		}
-		currentBlock = newBlock
-		args = append(args, arg)
-	} else {
-		// For input methods, verify no arguments
-		if len(dispatch.Arguments) != 0 {
-			return nil, currentBlock, fmt.Errorf("expected 0 arguments for %s, got %d", methodName, len(dispatch.Arguments))
-		}
-	}
-
-	// Call the appropriate IO method
-	method := cg.methods["IO"][methodName]
-	result := currentBlock.NewCall(method, args...)
-
-	// For input methods, return the result. For output methods, return null
-	if methodName == "in_string" || methodName == "in_int" {
-		return result, currentBlock, nil
-	}
-	return constant.NewNull(types.NewPointer(types.I8)), currentBlock, nil
-}
-
-func (cg *CodeGenerator) generateMethod(className string, method *ast.Method) error {
-	// Save previous state
-	prevClass := cg.currentClass
-	cg.currentClass = className
-	defer func() { cg.currentClass = prevClass }()
-
-	// Save the previous bindings
-	prevBindings := cg.currentBindings
-	cg.currentBindings = make(map[string]value.Value)
-
-	// Create function parameters
-	params := make([]*ir.Param, 0, len(method.Formals)+1)
-
-	// Add self parameter
-	selfParam := ir.NewParam("self", types.NewPointer(types.I8))
-	params = append(params, selfParam)
-
-	// Add formal parameters
-	for _, formal := range method.Formals {
-		paramType := cg.getLLVMType(formal.Type)
-		param := ir.NewParam(formal.Name.Value, paramType)
-		params = append(params, param)
-	}
-
-	// Create function
-	returnType := cg.getLLVMType(method.Type)
-	fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", className, method.Name.Value),
-		returnType, params...)
-
-	// Store the method in our method map
-	if cg.methods[className] == nil {
-		cg.methods[className] = make(map[string]*ir.Func)
-	}
-	cg.methods[className][method.Name.Value] = fn
-
-	// Generate code for method body
-	cg.currentFunc = fn
-	block := fn.NewBlock("")
-
-	// Add parameters to current bindings
-	for i, formal := range method.Formals {
-		// Create an alloca for the parameter
-		alloca := block.NewAlloca(params[i+1].Type())
-		// Store the parameter value
-		block.NewStore(params[i+1], alloca)
-		// Add to bindings
-		cg.currentBindings[formal.Name.Value] = alloca
-	}
-
-	// Generate expression
-	value, block, err := cg.generateExpression(block, method.Body)
-	if err != nil {
-		return err
-	}
-
-	// Ensure the block is terminated
-	if block.Term == nil {
-		block.NewRet(value)
-	}
-
-	// Restore previous bindings
-	cg.currentBindings = prevBindings
-
-	return nil
 }
 
 // getLLVMType converts a COOL type to an LLVM type
