@@ -1,0 +1,1 @@
+clang-cl output.ll /Fe:a.exe /MD /link /subsystem:console libucrt.lib libcmt.lib legacy_stdio_definitions.lib advapi32.lib shell32.lib user32.lib kernel32.lib msvcrt.lib

@@ -47,9 +47,6 @@ func New() *CodeGenerator {
 		classFields:     make(map[string]map[string]int),
 	}
 
-	// Set target triple for Windows MSVC
-	cg.module.TargetTriple = "x86_64-pc-windows-msvc19.43.34808"
-
 	// Declare external functions
 	printfType := types.NewPointer(types.I8)
 	cg.printf = cg.module.NewFunc("printf", types.I32, ir.NewParam("format", printfType))
@@ -576,33 +573,33 @@ func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method
 
 // Walk upward through parents until we find the method or run out of parents
 func (cg *CodeGenerator) lookupMethod(className, methodName string) (*ir.Func, bool) {
-	fmt.Printf("DEBUG: Looking up method %s in class %s\n", methodName, className)
+	// fmt.Printf("DEBUG: Looking up method %s in class %s\n", methodName, className)
 
 	for currentClass := className; currentClass != ""; {
-		fmt.Printf("DEBUG: Checking class %s for method %s\n", currentClass, methodName)
+		// fmt.Printf("DEBUG: Checking class %s for method %s\n", currentClass, methodName)
 
 		// Check if the class has methods
 		if classMethods, exists := cg.methods[currentClass]; exists {
-			fmt.Printf("DEBUG: Found methods for class %s: %v\n", currentClass, getMethodNames(classMethods))
+			// fmt.Printf("DEBUG: Found methods for class %s: %v\n", currentClass, getMethodNames(classMethods))
 
 			// Check if the method exists in this class
 			if method, exists := classMethods[methodName]; exists {
-				fmt.Printf("DEBUG: Found method %s in class %s\n", methodName, currentClass)
+				// fmt.Printf("DEBUG: Found method %s in class %s\n", methodName, currentClass)
 
 				return method, true
 			}
 		} else {
-			fmt.Printf("DEBUG: No methods found for class %s\n", currentClass)
+			// fmt.Printf("DEBUG: No methods found for class %s\n", currentClass)
 		}
 
 		// Move up the inheritance chain
 		parent, exists := cg.classParents[currentClass]
 		if !exists || parent == "" {
-			fmt.Printf("DEBUG: No parent found for class %s\n", currentClass)
+			// fmt.Printf("DEBUG: No parent found for class %s\n", currentClass)
 
 			break
 		}
-		fmt.Printf("DEBUG: Moving up to parent class %s\n", parent)
+		// fmt.Printf("DEBUG: Moving up to parent class %s\n", parent)
 
 		currentClass = parent
 	}
@@ -669,14 +666,14 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		// In the DynamicDispatch case in generateExpression, modify the type determination section:
 	case *ast.DynamicDispatch:
 		methodName := e.Method.Value
-		fmt.Printf("DEBUG: Processing dynamic dispatch for method %s\n", methodName)
+		// fmt.Printf("DEBUG: Processing dynamic dispatch for method %s\n", methodName)
 
 		// First, generate code for the object we're dispatching on
 		var objValue value.Value
 		var objType string
 
 		if e.Object == nil || e.Object.TokenLiteral() == "self" {
-			fmt.Printf("DEBUG: Dispatch object is self\n")
+			// fmt.Printf("DEBUG: Dispatch object is self\n")
 
 			// If object is nil or self, use current function's self parameter
 			if cg.currentFunc == nil {
@@ -686,7 +683,7 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 			// Use the current class type if we're in a method
 			objType = strings.Split(cg.currentFunc.Name(), "_")[0]
 		} else {
-			fmt.Printf("DEBUG: Generating code for dispatch object: %T\n", e.Object)
+			// fmt.Printf("DEBUG: Generating code for dispatch object: %T\n", e.Object)
 
 			// Generate code for the object expression
 			var newBlock *ir.Block
