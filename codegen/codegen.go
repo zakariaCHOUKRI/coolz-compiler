@@ -324,7 +324,7 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Return the concatenated string
 	block.NewRet(newStr2)
 
-	// First pass: Register all classes and setup inheritance
+	// First pass: Register all classes, inheritance, and methods
 	for _, class := range program.Classes {
 		className := class.Name.Value
 
@@ -335,13 +335,14 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 			cg.classParents[className] = "Object"
 		}
 
-		// Initialize method map for this class
-		if cg.methods[className] == nil {
-			cg.methods[className] = make(map[string]*ir.Func)
-		}
-
 		// Create class layout
 		cg.createClassLayout(className, program)
+
+		// Register methods (including inherited ones)
+		err := cg.registerClassMethods(class)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Second pass: Generate all class methods and bodies
@@ -384,6 +385,54 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	block.NewRet(constant.NewInt(types.I32, 0))
 
 	return cg.module, nil
+}
+
+// Add this helper function
+func (cg *CodeGenerator) registerClassMethods(class *ast.Class) error {
+	className := class.Name.Value
+
+	// Initialize method map if not exists
+	if cg.methods[className] == nil {
+		cg.methods[className] = make(map[string]*ir.Func)
+	}
+
+	// If this class has a parent, inherit its methods first
+	if class.Parent != nil {
+		parentName := class.Parent.Value
+		if parentMethods, exists := cg.methods[parentName]; exists {
+			// Copy parent methods
+			for methodName, method := range parentMethods {
+				// Only copy if the method isn't overridden in current class
+				if _, overridden := cg.methods[className][methodName]; !overridden {
+					cg.methods[className][methodName] = method
+				}
+			}
+		}
+	}
+
+	// Register class's own methods
+	for _, feature := range class.Features {
+		if method, ok := feature.(*ast.Method); ok {
+			// Create function parameters
+			params := make([]*ir.Param, 0, len(method.Formals)+1)
+			params = append(params, ir.NewParam("self", types.NewPointer(types.I8)))
+
+			for _, formal := range method.Formals {
+				paramType := cg.getLLVMType(formal.Type)
+				params = append(params, ir.NewParam(formal.Name.Value, paramType))
+			}
+
+			// Create function
+			returnType := cg.getLLVMType(method.Type)
+			fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", className, method.Name.Value),
+				returnType, params...)
+
+			// Register the method
+			cg.methods[className][method.Name.Value] = fn
+		}
+	}
+
+	return nil
 }
 
 func (cg *CodeGenerator) calculateStructSize(layout *types.StructType) int64 {
@@ -435,42 +484,6 @@ func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) e
 	cg.createClassLayout(class.Name.Value, program)
 
 	className := class.Name.Value
-
-	if cg.methods[className] == nil {
-		cg.methods[className] = make(map[string]*ir.Func)
-	}
-
-	// First pass: Register all attributes and methods
-	for _, feature := range class.Features {
-		switch f := feature.(type) {
-		case *ast.Method:
-			// Create function parameters, starting with self
-			params := make([]*ir.Param, 0, len(f.Formals)+1)
-
-			// Always add self as first parameter
-			selfParam := ir.NewParam("self", types.NewPointer(types.I8))
-			params = append(params, selfParam)
-
-			// Add other parameters
-			for _, formal := range f.Formals {
-				paramType := cg.getLLVMType(formal.Type)
-				param := ir.NewParam(formal.Name.Value, paramType)
-				params = append(params, param)
-			}
-
-			// Create function
-			returnType := cg.getLLVMType(f.Type)
-			fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", className, f.Name.Value),
-				returnType, params...)
-
-			// Register the method
-			cg.methods[className][f.Name.Value] = fn
-
-		case *ast.Attribute:
-			// Handle attributes here (will be needed for proper object layout)
-			cg.currentTypes[fmt.Sprintf("%s_%s", className, f.Name.Value)] = f.Type.Value
-		}
-	}
 
 	// Override type_name method for this class
 	typeNameFunc := cg.module.NewFunc(fmt.Sprintf("%s_type_name", className),

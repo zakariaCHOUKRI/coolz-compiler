@@ -161,11 +161,6 @@ define i8* @Printer_println(i8* %self, i8* %x) {
 	ret i8* %5
 }
 
-define i8* @Printer_type_name(i8* %self) {
-0:
-	ret i8* getelementptr ([8 x i8], [8 x i8]* @str.7, i32 0, i32 0)
-}
-
 define i8* @Main_main(i8* %self) {
 0:
 	%1 = bitcast i8* %self to { i8*, i8*, i8*, i8* }*
@@ -211,6 +206,11 @@ define i8* @Main_main(i8* %self) {
 	%36 = load i8*, i8** %31
 	%37 = call i8* @Printer_println(i8* %self, i8* %36)
 	ret i8* %37
+}
+
+define i8* @Printer_type_name(i8* %self) {
+0:
+	ret i8* getelementptr ([8 x i8], [8 x i8]* @str.7, i32 0, i32 0)
 }
 
 define i8* @Main_type_name(i8* %self) {
