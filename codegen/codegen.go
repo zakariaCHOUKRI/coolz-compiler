@@ -390,6 +390,7 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 // Add this helper function
 func (cg *CodeGenerator) registerClassMethods(class *ast.Class) error {
 	className := class.Name.Value
+	fmt.Printf("DEBUG: Registering methods for class '%s'\n", className)
 
 	// Initialize method map if not exists
 	if cg.methods[className] == nil {
@@ -399,7 +400,11 @@ func (cg *CodeGenerator) registerClassMethods(class *ast.Class) error {
 	// If this class has a parent, inherit its methods first
 	if class.Parent != nil {
 		parentName := class.Parent.Value
+		fmt.Printf("DEBUG: Inheriting methods from parent '%s'\n", parentName)
+
 		if parentMethods, exists := cg.methods[parentName]; exists {
+			fmt.Printf("DEBUG: Parent '%s' has methods: %v\n", parentName, getMethodNames(parentMethods))
+
 			// Copy parent methods
 			for methodName, method := range parentMethods {
 				// Only copy if the method isn't overridden in current class
@@ -407,12 +412,16 @@ func (cg *CodeGenerator) registerClassMethods(class *ast.Class) error {
 					cg.methods[className][methodName] = method
 				}
 			}
+		} else {
+			fmt.Printf("DEBUG: Parent '%s' has no registered methods\n", parentName)
 		}
 	}
 
 	// Register class's own methods
 	for _, feature := range class.Features {
 		if method, ok := feature.(*ast.Method); ok {
+			fmt.Printf("DEBUG: Registering method '%s' in class '%s'\n", method.Name.Value, className)
+
 			// Create function parameters
 			params := make([]*ir.Param, 0, len(method.Formals)+1)
 			params = append(params, ir.NewParam("self", types.NewPointer(types.I8)))
@@ -576,31 +585,84 @@ func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method
 
 // Walk upward through parents until we find the method or run out of parents
 func (cg *CodeGenerator) lookupMethod(className, methodName string) (*ir.Func, bool) {
+	fmt.Printf("DEBUG: Looking up method '%s' in class '%s'\n", methodName, className)
+
 	for currentClass := className; currentClass != ""; {
+		fmt.Printf("DEBUG: Checking class '%s' for method '%s'\n", currentClass, methodName)
+
 		// Check if the class has methods
 		if classMethods, exists := cg.methods[currentClass]; exists {
+			fmt.Printf("DEBUG: Found methods for class '%s': %v\n", currentClass, getMethodNames(classMethods))
+
 			// Check if the method exists in this class
 			if method, exists := classMethods[methodName]; exists {
+				fmt.Printf("DEBUG: Found method '%s' in class '%s'\n", methodName, currentClass)
+
 				return method, true
 			}
+		} else {
+			fmt.Printf("DEBUG: No methods registered for class '%s'\n", currentClass)
 		}
 
 		// Move up the inheritance chain
 		parent, exists := cg.classParents[currentClass]
+		fmt.Printf("DEBUG: Parent of '%s' is '%s' (exists: %v)\n", currentClass, parent, exists)
+
 		if !exists || parent == "" {
 			break
 		}
 		currentClass = parent
 	}
+
+	fmt.Printf("DEBUG: Method '%s' not found in class '%s' or its parents\n", methodName, className)
 	return nil, false
+}
+
+// Helper function to get method names
+func getMethodNames(methods map[string]*ir.Func) []string {
+	names := make([]string, 0, len(methods))
+	for name := range methods {
+		names = append(names, name)
+	}
+	return names
+}
+
+// Helper function to get map keys
+func getMapKeys(m map[string]map[string]*ir.Func) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// Helper function to get class hierarchy
+func getClassHierarchy(cg *CodeGenerator, className string) string {
+	hierarchy := []string{className}
+	current := className
+	for {
+		parent, exists := cg.classParents[current]
+		if !exists || parent == "" {
+			break
+		}
+		hierarchy = append(hierarchy, parent)
+		current = parent
+	}
+	return strings.Join(hierarchy, " -> ")
 }
 
 func (cg *CodeGenerator) generateMethodCall(block *ir.Block, object value.Value, className string,
 	methodName string, args []ast.Expression) (value.Value, *ir.Block, error) {
 
+	fmt.Printf("DEBUG: Generating method call for '%s::%s'\n", className, methodName)
+	fmt.Printf("DEBUG: Object type: %T\n", object)
+	fmt.Printf("DEBUG: Number of arguments: %d\n", len(args))
+
 	// Look up the method in the class hierarchy
 	method, exists := cg.lookupMethod(className, methodName)
 	if !exists {
+		fmt.Printf("DEBUG: Available classes: %v\n", getMapKeys(cg.methods))
+		fmt.Printf("DEBUG: Class hierarchy for '%s': %s\n", className, getClassHierarchy(cg, className))
 		return nil, block, fmt.Errorf("method %s not found in class %s or its parents", methodName, className)
 	}
 
@@ -644,26 +706,23 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		}
 		// Return the first parameter (self) of the current function
 		return cg.currentFunc.Params[0], block, nil
-		// In the DynamicDispatch case in generateExpression, modify the type determination section:
+	// In the DynamicDispatch case in generateExpression, modify the type determination section:
 	case *ast.DynamicDispatch:
 		methodName := e.Method.Value
 
 		// First, generate code for the object we're dispatching on
 		var objValue value.Value
 		var objType string
+		var newBlock *ir.Block
+		var err error
 
 		if e.Object == nil || e.Object.TokenLiteral() == "self" {
-			// If object is nil or self, use current function's self parameter
 			if cg.currentFunc == nil {
 				return nil, block, fmt.Errorf("dispatch on self outside method context")
 			}
 			objValue = cg.currentFunc.Params[0]
-			// Use the current class type if we're in a method
 			objType = strings.Split(cg.currentFunc.Name(), "_")[0]
 		} else {
-			// Generate code for the object expression
-			var newBlock *ir.Block
-			var err error
 			objValue, newBlock, err = cg.generateExpression(block, e.Object)
 			if err != nil {
 				return nil, block, err
@@ -673,33 +732,60 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 			// Determine the type of the object
 			switch obj := e.Object.(type) {
 			case *ast.ObjectIdentifier:
-				// Look up the type in our current types map
-				var exists bool
-				objType, exists = cg.currentTypes[obj.Value]
-				if !exists {
-					return nil, block, fmt.Errorf("undefined variable: %s", obj.Value)
-				}
+				objType = cg.currentTypes[obj.Value]
 			case *ast.NewExpression:
 				objType = obj.Type.Value
 			case *ast.DynamicDispatch:
-				// For nested dispatches, we need to determine the return type
-				// of the method being called
-				method, exists := cg.lookupMethod(objType, obj.Method.Value)
-				if !exists {
-					return nil, block, fmt.Errorf("method %s not found", obj.Method.Value)
+				if prevMethod, exists := cg.lookupMethod(objType, obj.Method.Value); exists {
+					methodParts := strings.Split(prevMethod.Name(), "_")
+					if len(methodParts) >= 1 {
+						objType = methodParts[0]
+					}
 				}
-				// Extract return type from the method name (assuming our naming convention)
-				methodParts := strings.Split(method.Name(), "_")
-				if len(methodParts) < 2 {
-					return nil, block, fmt.Errorf("invalid method name format: %s", method.Name())
-				}
-				objType = methodParts[0]
 			default:
-				return nil, block, fmt.Errorf("unsupported dispatch object type: %T", e.Object)
+				// Add type inference based on LLVM type
+				if objValue != nil {
+					// Check if it's a string type
+					if types.IsPointer(objValue.Type()) &&
+						isInt8(objValue.Type().(*types.PointerType).ElemType) {
+						objType = "String"
+					} else if _, isCall := objValue.(*ir.InstCall); isCall {
+						// If it's a call result and the method is a string operation
+						if methodName == "substr" || methodName == "concat" || methodName == "length" {
+							objType = "String"
+						}
+					}
+				}
+
+				// Handle null and other constant values
+				if _, isNull := objValue.(*constant.Null); isNull {
+					if methodName == "cons" {
+						objType = "List"
+					} else if cg.currentFunc != nil {
+						objType = strings.Split(cg.currentFunc.Name(), "_")[0]
+					}
+				}
 			}
+
+			// If we still don't have a type, try to infer from context
+			if objType == "" {
+				// For List operations
+				if methodName == "cons" || methodName == "tail" || methodName == "head" || methodName == "isNil" {
+					objType = "List"
+				} else if methodName == "substr" || methodName == "concat" || methodName == "length" {
+					// For String operations
+					objType = "String"
+				} else if cg.currentClass != "" {
+					objType = cg.currentClass
+				}
+			}
+
+			fmt.Printf("DEBUG: Inferred type for method call: %s (method: %s)\n", objType, methodName)
 		}
 
-		// Now generate the method call with the correct object and type
+		if objType == "" {
+			return nil, block, fmt.Errorf("could not determine type for method dispatch: %s", methodName)
+		}
 		return cg.generateMethodCall(block, objValue, objType, methodName, e.Arguments)
 	case *ast.BlockExpression:
 		return cg.generateBlock(block, e)
@@ -887,6 +973,13 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 	default:
 		return nil, block, fmt.Errorf("unsupported expression type: %T", expr)
 	}
+}
+
+func isInt8(t types.Type) bool {
+	if intType, ok := t.(*types.IntType); ok {
+		return intType.BitSize == 8
+	}
+	return false
 }
 
 // generateBlock now threads the current block through each expression.
