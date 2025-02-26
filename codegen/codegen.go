@@ -31,6 +31,7 @@ type CodeGenerator struct {
 	classFields     map[string]map[string]int // Maps class->field->index
 	currentClass    string
 	strlen          *ir.Func
+	program         *ast.Program // Add this field
 }
 
 // In the New() function, add malloc declaration:
@@ -82,6 +83,8 @@ func New() *CodeGenerator {
 
 // Generate generates LLVM IR for the entire program
 func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
+	cg.program = program
+
 	// Initialize Object class as the root
 	cg.classParents["Object"] = ""
 	cg.methods["Object"] = make(map[string]*ir.Func)
@@ -321,21 +324,29 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	// Return the concatenated string
 	block.NewRet(newStr2)
 
-	// Initialize class inheritance relationships first
+	// First pass: Register all classes and setup inheritance
 	for _, class := range program.Classes {
+		className := class.Name.Value
+
+		// Register inheritance
 		if class.Parent != nil {
-			cg.classParents[class.Name.Value] = class.Parent.Value
-		} else if class.Name.Value != "Object" {
-			// If no explicit parent is specified and it's not Object,
-			// make Object the implicit parent
-			cg.classParents[class.Name.Value] = "Object"
+			cg.classParents[className] = class.Parent.Value
+		} else if className != "Object" {
+			cg.classParents[className] = "Object"
 		}
+
+		// Initialize method map for this class
+		if cg.methods[className] == nil {
+			cg.methods[className] = make(map[string]*ir.Func)
+		}
+
+		// Create class layout
+		cg.createClassLayout(className, program)
 	}
 
-	// Now generate code for all COOL classes
-	// Now generate code for all COOL classes
+	// Second pass: Generate all class methods and bodies
 	for _, class := range program.Classes {
-		err := cg.generateClass(class, program) // Pass program here
+		err := cg.generateClass(class, program)
 		if err != nil {
 			return nil, err
 		}
@@ -499,6 +510,34 @@ func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method
 	fn := cg.methods[className][method.Name.Value]
 	block := fn.NewBlock("")
 
+	// Add class attributes to scope first
+	self := fn.Params[0]
+	structPtr := block.NewBitCast(self, types.NewPointer(cg.classLayouts[className]))
+
+	// Add all attributes from the class hierarchy
+	currentClass := className
+	for currentClass != "" {
+		if fields, exists := cg.classFields[currentClass]; exists {
+			for fieldName, fieldIndex := range fields {
+				fieldPtr := block.NewGetElementPtr(cg.classLayouts[className], structPtr,
+					constant.NewInt(types.I32, 0),
+					constant.NewInt(types.I32, int64(fieldIndex)))
+				cg.currentBindings[fieldName] = fieldPtr
+				// Store the attribute type
+				for _, class := range cg.program.Classes {
+					if class.Name.Value == currentClass {
+						for _, feature := range class.Features {
+							if attr, ok := feature.(*ast.Attribute); ok && attr.Name.Value == fieldName {
+								cg.currentTypes[fieldName] = attr.Type.Value
+							}
+						}
+					}
+				}
+			}
+		}
+		currentClass = cg.classParents[currentClass]
+	}
+
 	// Store parameters in allocas
 	for i, formal := range method.Formals {
 		alloca := block.NewAlloca(fn.Params[i+1].Type())
@@ -592,6 +631,7 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		}
 		// Return the first parameter (self) of the current function
 		return cg.currentFunc.Params[0], block, nil
+		// In the DynamicDispatch case in generateExpression, modify the type determination section:
 	case *ast.DynamicDispatch:
 		methodName := e.Method.Value
 
@@ -628,6 +668,19 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 				}
 			case *ast.NewExpression:
 				objType = obj.Type.Value
+			case *ast.DynamicDispatch:
+				// For nested dispatches, we need to determine the return type
+				// of the method being called
+				method, exists := cg.lookupMethod(objType, obj.Method.Value)
+				if !exists {
+					return nil, block, fmt.Errorf("method %s not found", obj.Method.Value)
+				}
+				// Extract return type from the method name (assuming our naming convention)
+				methodParts := strings.Split(method.Name(), "_")
+				if len(methodParts) < 2 {
+					return nil, block, fmt.Errorf("invalid method name format: %s", method.Name())
+				}
+				objType = methodParts[0]
 			default:
 				return nil, block, fmt.Errorf("unsupported dispatch object type: %T", e.Object)
 			}
@@ -640,14 +693,38 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 	case *ast.LetExpression:
 		return cg.generateLet(block, e)
 	case *ast.ObjectIdentifier:
-		// Look up the variable in current bindings.
-		for name, alloca := range cg.currentBindings {
-			if strings.HasPrefix(name, e.Value) {
-				// Load the value from the alloca instruction.
-				return block.NewLoad(alloca.Type().(*types.PointerType).ElemType, alloca), block, nil
+		// First check if it's a local variable
+		if alloca, exists := cg.currentBindings[e.Value]; exists {
+			// If it's a pointer to a field, just return the pointer
+			if strings.Contains(alloca.Type().String(), "GEP") {
+				return alloca, block, nil
+			}
+			// Otherwise load the value
+			return block.NewLoad(alloca.Type().(*types.PointerType).ElemType, alloca), block, nil
+		}
+
+		// If not found as local, check if it's a class attribute
+		if cg.currentFunc != nil && cg.currentClass != "" {
+			self := cg.currentFunc.Params[0]
+			structPtr := block.NewBitCast(self, types.NewPointer(cg.classLayouts[cg.currentClass]))
+
+			// Look up through the class hierarchy
+			currentClass := cg.currentClass
+			for currentClass != "" {
+				if fieldIndex, exists := cg.classFields[currentClass][e.Value]; exists {
+					fieldPtr := block.NewGetElementPtr(cg.classLayouts[cg.currentClass], structPtr,
+						constant.NewInt(types.I32, 0),
+						constant.NewInt(types.I32, int64(fieldIndex)))
+
+					// Load and return the field value
+					fieldType := cg.classLayouts[cg.currentClass].Fields[fieldIndex]
+					return block.NewLoad(fieldType, fieldPtr), block, nil
+				}
+				currentClass = cg.classParents[currentClass]
 			}
 		}
-		return nil, block, fmt.Errorf("undefined variable: %s", e.Value)
+
+		return nil, block, fmt.Errorf("undefined variable or attribute: %s", e.Value)
 	case *ast.BinaryExpression:
 		left, block, err := cg.generateExpression(block, e.Left)
 		if err != nil {
