@@ -447,15 +447,8 @@ func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) e
 				params = append(params, param)
 			}
 
-			// Create function with self as first parameter
-			var returnType types.Type
-			if f.Name.Value == "init" {
-				// init always returns self (Object pointer)
-				returnType = types.NewPointer(types.I8)
-			} else {
-				returnType = cg.getLLVMType(f.Type)
-			}
-
+			// Create function
+			returnType := cg.getLLVMType(f.Type)
 			fn := cg.module.NewFunc(fmt.Sprintf("%s_%s", className, f.Name.Value),
 				returnType, params...)
 
@@ -464,13 +457,9 @@ func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) e
 
 		case *ast.Attribute:
 			// Handle attributes here (will be needed for proper object layout)
-			// For now, we just track their types
 			cg.currentTypes[fmt.Sprintf("%s_%s", className, f.Name.Value)] = f.Type.Value
 		}
 	}
-
-	// After registering all methods, we need to override type_name for each class
-	// Add this after the first pass where methods are registered
 
 	// Override type_name method for this class
 	typeNameFunc := cg.module.NewFunc(fmt.Sprintf("%s_type_name", className),
@@ -478,12 +467,8 @@ func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) e
 		ir.NewParam("self", types.NewPointer(types.I8)))
 
 	block := typeNameFunc.NewBlock("")
-
-	// Return a string constant with the actual class name
 	classNameStr := cg.getStringConstant(className)
 	block.NewRet(classNameStr)
-
-	// Register the overridden method
 	cg.methods[className]["type_name"] = typeNameFunc
 
 	// Second pass: Generate method bodies
@@ -492,13 +477,7 @@ func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) e
 			prevFunc := cg.currentFunc
 			cg.currentFunc = cg.methods[className][method.Name.Value]
 
-			// Special handling for init method
-			var err error
-			if method.Name.Value == "init" {
-				err = cg.generateInitMethodBody(className, method)
-			} else {
-				err = cg.generateMethodBody(className, method)
-			}
+			err := cg.generateMethodBody(className, method)
 			if err != nil {
 				return err
 			}
@@ -507,41 +486,6 @@ func (cg *CodeGenerator) generateClass(class *ast.Class, program *ast.Program) e
 		}
 	}
 
-	return nil
-}
-
-func (cg *CodeGenerator) generateInitMethodBody(className string, method *ast.Method) error {
-	// Save previous state
-	prevBindings := cg.currentBindings
-	prevTypes := cg.currentTypes
-	cg.currentBindings = make(map[string]value.Value)
-	cg.currentTypes = make(map[string]string)
-
-	fn := cg.methods[className][method.Name.Value]
-	block := fn.NewBlock("")
-
-	// Store parameters in allocas
-	for i, formal := range method.Formals {
-		alloca := block.NewAlloca(fn.Params[i+1].Type())
-		block.NewStore(fn.Params[i+1], alloca)
-		cg.currentBindings[formal.Name.Value] = alloca
-		cg.currentTypes[formal.Name.Value] = formal.Type.Value
-	}
-
-	// Generate the initialization code
-	_, block, err := cg.generateExpression(block, method.Body)
-	if err != nil {
-		return err
-	}
-
-	// Always return self from init
-	if block.Term == nil {
-		block.NewRet(fn.Params[0]) // Return self
-	}
-
-	// Restore previous state
-	cg.currentBindings = prevBindings
-	cg.currentTypes = prevTypes
 	return nil
 }
 
@@ -555,8 +499,7 @@ func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method
 	fn := cg.methods[className][method.Name.Value]
 	block := fn.NewBlock("")
 
-	// self is always fn.Params[0]
-	// Store other parameters starting from index 1
+	// Store parameters in allocas
 	for i, formal := range method.Formals {
 		alloca := block.NewAlloca(fn.Params[i+1].Type())
 		block.NewStore(fn.Params[i+1], alloca)

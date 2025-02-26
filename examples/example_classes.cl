@@ -44,11 +44,11 @@ class Main inherits Child{
             };
 
             print2("1", "2");
-            self.print("this should print");
+            self.print("this should be printed");
             print(type_name());
 
             abort();
-            print("this should not print");
+            print("this should not be printed");
         }
     };
 };

@@ -35,6 +35,7 @@ class Main inherits Printer {
                 println("");
             };
 
+            println("testing concat() ...");
             print("Please input a string a: ");
             let a : String <- in_string() in {
                 print("Please input a string b: ");
