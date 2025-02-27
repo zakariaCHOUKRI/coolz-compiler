@@ -5,17 +5,8 @@
 @str.4 = global [9 x i8] c"%255[^\0A]\00"
 @str.5 = global [4 x i8] c"%*c\00"
 @str.6 = global [28 x i8] c"Error: substr out of range\0A\00"
-@str.7 = global [7 x i8] c"Parent\00"
-@str.8 = global [2 x i8] c"\0A\00"
-@str.9 = global [7 x i8] c"parent\00"
-@str.10 = global [6 x i8] c"Child\00"
-@str.11 = global [6 x i8] c"child\00"
-@str.12 = global [5 x i8] c"Main\00"
-@str.13 = global [9 x i8] c"Let's go\00"
-@str.14 = global [2 x i8] c"1\00"
-@str.15 = global [2 x i8] c"2\00"
-@str.16 = global [23 x i8] c"this should be printed\00"
-@str.17 = global [27 x i8] c"this should not be printed\00"
+@str.7 = global [5 x i8] c"Main\00"
+@str.8 = global [6 x i8] c"hello\00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -132,86 +123,18 @@ define i8* @String_concat(i8* %self, i8* %s) {
 	ret i8* %5
 }
 
-define i8* @Parent_print(i8* %self, i8* %x) {
-0:
-	%1 = bitcast i8* %self to { i8*, i8*, i8* }*
-	%2 = alloca i8*
-	store i8* %x, i8** %2
-	%3 = load i8*, i8** %2
-	%4 = call i8* @IO_out_string(i8* %self, i8* %3)
-	%5 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.8, i32 0, i32 0))
-	ret i8* %5
-}
-
-define i8* @Parent_polymorphism(i8* %self) {
-0:
-	%1 = bitcast i8* %self to { i8*, i8*, i8* }*
-	%2 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([7 x i8], [7 x i8]* @str.9, i32 0, i32 0))
-	%3 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.8)
-	ret i8* %3
-}
-
-define i8* @Child_print2(i8* %self, i8* %x, i8* %y) {
-0:
-	%1 = bitcast i8* %self to { i8*, i8*, i8*, i8* }*
-	%2 = alloca i8*
-	store i8* %x, i8** %2
-	%3 = alloca i8*
-	store i8* %y, i8** %3
-	%4 = load i8*, i8** %2
-	%5 = call i8* @Parent_print(i8* %self, i8* %4)
-	%6 = load i8*, i8** %3
-	%7 = call i8* @Parent_print(i8* %self, i8* %6)
-	ret i8* %7
-}
-
-define i8* @Child_polymorphism(i8* %self) {
-0:
-	%1 = bitcast i8* %self to { i8*, i8*, i8*, i8* }*
-	%2 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([6 x i8], [6 x i8]* @str.11, i32 0, i32 0))
-	%3 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.8)
-	ret i8* %3
-}
-
 define i8* @Main_main(i8* %self) {
 0:
-	%1 = bitcast i8* %self to { i8*, i8*, i8*, i8*, i8* }*
-	%2 = alloca i8*
-	store i8* null, i8** %2
-	%3 = load i8*, i8** %2
-	%4 = call i8* @Parent_print(i8* %3, i8* getelementptr ([9 x i8], [9 x i8]* @str.13, i32 0, i32 0))
-	%5 = load i8*, i8** %2
-	%6 = load i8*, i8** %2
-	%7 = call i8* @Child_type_name(i8* %6)
-	%8 = call i8* @Parent_print(i8* %5, i8* %7)
-	%9 = load i8*, i8** %2
-	%10 = call i8* @Child_polymorphism(i8* %9)
-	%11 = alloca i8*
-	store i8* null, i8** %11
-	%12 = load i8*, i8** %11
-	%13 = call i8* @Parent_polymorphism(i8* %12)
-	%14 = call i8* @Child_print2(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.14, i32 0, i32 0), i8* getelementptr ([2 x i8], [2 x i8]* @str.15, i32 0, i32 0))
-	%15 = call i8* @Parent_print(i8* %self, i8* getelementptr ([23 x i8], [23 x i8]* @str.16, i32 0, i32 0))
-	%16 = call i8* @Main_type_name(i8* %self)
-	%17 = call i8* @Parent_print(i8* %self, i8* %16)
-	%18 = call i8* @Object_abort(i8* %self)
-	%19 = call i8* @Parent_print(i8* %self, i8* getelementptr ([27 x i8], [27 x i8]* @str.17, i32 0, i32 0))
-	ret i8* %19
-}
-
-define i8* @Parent_type_name(i8* %self) {
-0:
-	ret i8* getelementptr ([7 x i8], [7 x i8]* @str.7, i32 0, i32 0)
-}
-
-define i8* @Child_type_name(i8* %self) {
-0:
-	ret i8* getelementptr ([6 x i8], [6 x i8]* @str.10, i32 0, i32 0)
+	%1 = bitcast i8* %self to { i8*, i8*, i8* }*
+	%2 = call i8* @Object_type_name(i8* getelementptr ([6 x i8], [6 x i8]* @str.8, i32 0, i32 0))
+	%3 = call i8* @String_substr(i8* %2, i64 1, i64 3)
+	%4 = call i8* @IO_out_string(i8* %self, i8* %3)
+	ret i8* %4
 }
 
 define i8* @Main_type_name(i8* %self) {
 0:
-	ret i8* getelementptr ([5 x i8], [5 x i8]* @str.12, i32 0, i32 0)
+	ret i8* getelementptr ([5 x i8], [5 x i8]* @str.7, i32 0, i32 0)
 }
 
 define i32 @main() {

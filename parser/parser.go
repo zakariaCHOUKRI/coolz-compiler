@@ -603,37 +603,66 @@ func (p *Parser) parseLetExpression() ast.Expression {
 	if !p.expectCurrent(lexer.LET) {
 		return nil
 	}
-	for {
-		binding := &ast.LetBinding{}
-		idTok := p.curToken
-		if !p.expectCurrent(lexer.OBJECTID) {
+
+	// Parse first binding
+	binding := p.parseLetBinding()
+	if binding == nil {
+		return nil
+	}
+	exp.Bindings = append(exp.Bindings, binding)
+
+	// Parse additional bindings after commas
+	for p.curTokenIs(lexer.COMMA) {
+		p.nextToken() // consume comma
+		binding = p.parseLetBinding()
+		if binding == nil {
 			return nil
-		}
-		binding.Identifier = &ast.ObjectIdentifier{Token: idTok, Value: idTok.Literal}
-		if !p.expectCurrent(lexer.COLON) {
-			return nil
-		}
-		typeTok := p.curToken
-		if !p.expectCurrent(lexer.TYPEID) {
-			return nil
-		}
-		binding.Type = &ast.TypeIdentifier{Token: typeTok, Value: typeTok.Literal}
-		if p.curTokenIs(lexer.ASSIGN) {
-			p.nextToken()
-			binding.Init = p.parseExpression(LOWEST)
 		}
 		exp.Bindings = append(exp.Bindings, binding)
-		if !p.peekTokenIs(lexer.COMMA) {
-			break
-		}
-		p.nextToken()
-		p.nextToken()
 	}
+
 	if !p.expectCurrent(lexer.IN) {
 		return nil
 	}
+
 	exp.In = p.parseExpression(LOWEST)
 	return exp
+}
+
+// Helper function to parse a single let binding
+func (p *Parser) parseLetBinding() *ast.LetBinding {
+	binding := &ast.LetBinding{}
+
+	// Parse identifier
+	if !p.curTokenIs(lexer.OBJECTID) {
+		p.errors = append(p.errors, fmt.Sprintf("expected identifier in let binding, got %s", p.curToken.Type))
+		return nil
+	}
+	binding.Identifier = &ast.ObjectIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
+
+	// Parse type annotation
+	if !p.expectCurrent(lexer.COLON) {
+		return nil
+	}
+
+	if !p.curTokenIs(lexer.TYPEID) {
+		p.errors = append(p.errors, fmt.Sprintf("expected type in let binding, got %s", p.curToken.Type))
+		return nil
+	}
+	binding.Type = &ast.TypeIdentifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.nextToken()
+
+	// Parse optional initialization
+	if p.curTokenIs(lexer.ASSIGN) {
+		p.nextToken() // consume '<-'
+		binding.Init = p.parseExpression(LOWEST)
+		if binding.Init == nil {
+			return nil
+		}
+	}
+
+	return binding
 }
 
 func (p *Parser) parseAssignment(left ast.Expression) ast.Expression {

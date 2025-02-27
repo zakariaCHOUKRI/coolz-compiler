@@ -30,8 +30,7 @@ A modern COOL (Classroom Object Oriented Language) compiler implemented in Go wi
 
 ## 🌟 Features
 
-<details>
-<summary><b>📝 Lexical Analysis</b></summary>
+### 📝 Lexical Analysis
 
 - Full COOL token recognition including:
   - Keywords (class, if, then, else, fi, etc.)
@@ -41,10 +40,8 @@ A modern COOL (Classroom Object Oriented Language) compiler implemented in Go wi
 - Support for single-line comments (`--`) and nested multi-line comments (`(* *)`)
 - String literal processing with escape sequences
 - Line and column number tracking for error reporting
-</details>
 
-<details>
-<summary><b>🔍 Parser</b></summary>
+### 🔍 Parser
 
 - Complete COOL syntax support including:
   - Class definitions with inheritance
@@ -62,10 +59,8 @@ A modern COOL (Classroom Object Oriented Language) compiler implemented in Go wi
 - Detailed error reporting
 - AST generation with full source location information
 - Fully functional Pratt parsing
-</details>
 
-<details>
-<summary><b>🔎 Semantic Analysis</b></summary>
+### 🔎 Semantic Analysis
 
 - Full type checking system including:
   - Class hierarchy validation
@@ -79,10 +74,8 @@ A modern COOL (Classroom Object Oriented Language) compiler implemented in Go wi
 - Main class and main() method validation
 - Multiple error detection and reporting
 - Cycle detection in inheritance graphs
-</details>
 
-<details>
-<summary><b>⚙️ Code Generation</b></summary>
+### ⚙️ Code Generation
 
 - LLVM IR generation with:
   - Full class layout generation
@@ -95,7 +88,6 @@ A modern COOL (Classroom Object Oriented Language) compiler implemented in Go wi
   - String with length(), concat(), and substr() methods
   - Int and Bool with proper operations
 - Expression generation for all COOL features
-</details>
 
 ## 🚀 Getting Started
 
@@ -117,12 +109,12 @@ Generate LLVM IR code:
 ./coolz -o output.ll input.cl
 ```
 
-Compile to executable (Unix-like systems):
+Compile to executable;
 ```sh
 clang -o name output.ll
 ```
 
-Compile to executable (Windows with VS dependencies):
+The previous command doesn't work on my machine (Windows 10 + visual studio dependencies) so instead I use this one, so in case it doesn't work for you too try this one, and if it also does not work then try to fix clang (the problem is not from the compiler because it generates a ir code that the user has to transform to machine code depending on their machine using clang or other)
 ```sh
 clang-cl output.ll /Fe:name.exe /MD /link /subsystem:console libucrt.lib libcmt.lib legacy_stdio_definitions.lib advapi32.lib shell32.lib user32.lib kernel32.lib msvcrt.lib
 ```
@@ -130,5 +122,5 @@ clang-cl output.ll /Fe:name.exe /MD /link /subsystem:console libucrt.lib libcmt.
 ---
 
 <div align="center">
-Made with ❤️ (and a LOOOT of effort) by Zakaria CHOUKRI
+Made with ❤️ (and a LOOOOT of effort) by Zakaria CHOUKRI
 </div>

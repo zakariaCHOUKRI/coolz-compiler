@@ -100,13 +100,23 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	block.NewUnreachable()
 	cg.methods["Object"]["abort"] = abortFunc
 
-	// Modify the type_name() method initialization to use a vtable approach
+	// Modify the type_name() method initialization
 	typeNameFunc := cg.module.NewFunc("Object_type_name", types.NewPointer(types.I8),
 		ir.NewParam("self", types.NewPointer(types.I8)))
 	block = typeNameFunc.NewBlock("")
-	// Now we'll return "Object" only for the Object class
-	block.NewRet(cg.getStringConstant("Object"))
+
+	// Now we'll set the return type of type_name to be a String
+	objStr := cg.getStringConstant("Object")
+	block.NewRet(objStr)
 	cg.methods["Object"]["type_name"] = typeNameFunc
+
+	// Important: Add type_name to return String type in our type tracking
+	for className := range cg.methods {
+		if cg.currentTypes == nil {
+			cg.currentTypes = make(map[string]string)
+		}
+		cg.currentTypes[className+"_type_name"] = "String"
+	}
 
 	// Add copy() method
 	copyFunc := cg.module.NewFunc("Object_copy", types.NewPointer(types.I8),
@@ -573,35 +583,14 @@ func (cg *CodeGenerator) generateMethodBody(className string, method *ast.Method
 
 // Walk upward through parents until we find the method or run out of parents
 func (cg *CodeGenerator) lookupMethod(className, methodName string) (*ir.Func, bool) {
-	// fmt.Printf("DEBUG: Looking up method %s in class %s\n", methodName, className)
-
-	for currentClass := className; currentClass != ""; {
-		// fmt.Printf("DEBUG: Checking class %s for method %s\n", currentClass, methodName)
-
-		// Check if the class has methods
-		if classMethods, exists := cg.methods[currentClass]; exists {
-			// fmt.Printf("DEBUG: Found methods for class %s: %v\n", currentClass, getMethodNames(classMethods))
-
-			// Check if the method exists in this class
-			if method, exists := classMethods[methodName]; exists {
-				// fmt.Printf("DEBUG: Found method %s in class %s\n", methodName, currentClass)
-
+	currentClass := className
+	for currentClass != "" {
+		if methods, exists := cg.methods[currentClass]; exists {
+			if method, exists := methods[methodName]; exists {
 				return method, true
 			}
-		} else {
-			// fmt.Printf("DEBUG: No methods found for class %s\n", currentClass)
 		}
-
-		// Move up the inheritance chain
-		parent, exists := cg.classParents[currentClass]
-		if !exists || parent == "" {
-			// fmt.Printf("DEBUG: No parent found for class %s\n", currentClass)
-
-			break
-		}
-		// fmt.Printf("DEBUG: Moving up to parent class %s\n", parent)
-
-		currentClass = parent
+		currentClass = cg.classParents[currentClass]
 	}
 	return nil, false
 }
@@ -666,16 +655,13 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		// In the DynamicDispatch case in generateExpression, modify the type determination section:
 	case *ast.DynamicDispatch:
 		methodName := e.Method.Value
-		// fmt.Printf("DEBUG: Processing dynamic dispatch for method %s\n", methodName)
 
 		// First, generate code for the object we're dispatching on
 		var objValue value.Value
 		var objType string
 
 		if e.Object == nil || e.Object.TokenLiteral() == "self" {
-			// fmt.Printf("DEBUG: Dispatch object is self\n")
-
-			// If object is nil or self, use current function's self parameter
+			// Self dispatch handling
 			if cg.currentFunc == nil {
 				return nil, block, fmt.Errorf("dispatch on self outside method context")
 			}
@@ -683,8 +669,6 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 			// Use the current class type if we're in a method
 			objType = strings.Split(cg.currentFunc.Name(), "_")[0]
 		} else {
-			// fmt.Printf("DEBUG: Generating code for dispatch object: %T\n", e.Object)
-
 			// Generate code for the object expression
 			var newBlock *ir.Block
 			var err error
@@ -706,18 +690,48 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 			case *ast.NewExpression:
 				objType = obj.Type.Value
 			case *ast.DynamicDispatch:
-				// For nested dispatches, we need to determine the return type
-				// of the method being called
-				method, exists := cg.lookupMethod(objType, obj.Method.Value)
-				if !exists {
-					return nil, block, fmt.Errorf("method %s not found", obj.Method.Value)
+				// For nested dispatches, first determine the type of the method result
+				if objType == "" {
+					// If objType is not set, we need to determine it from the nested dispatch
+					switch obj.Object.(type) {
+					case *ast.StringLiteral:
+						objType = "String"
+					case *ast.IntegerLiteral:
+						objType = "Int"
+					case *ast.BooleanLiteral:
+						objType = "Bool"
+					default:
+						// For other cases, get the type from current types map
+						if innerObjId, ok := obj.Object.(*ast.ObjectIdentifier); ok {
+							if t, exists := cg.currentTypes[innerObjId.Value]; exists {
+								objType = t
+							}
+						}
+					}
 				}
-				// Extract return type from the method name (assuming our naming convention)
-				methodParts := strings.Split(method.Name(), "_")
-				if len(methodParts) < 2 {
-					return nil, block, fmt.Errorf("invalid method name format: %s", method.Name())
+
+				// Look up the method in the current objType
+				if method, exists := cg.lookupMethod(objType, obj.Method.Value); exists {
+					// For type_name method, we know it always returns String
+					if obj.Method.Value == "type_name" {
+						objType = "String"
+					} else {
+						// For other methods, extract return type from method name
+						parts := strings.Split(method.Name(), "_")
+						if len(parts) > 0 {
+							objType = parts[0] // The class name is always the first part
+						}
+					}
+				} else {
+					return nil, block, fmt.Errorf("method %s not found in class %s", obj.Method.Value, objType)
 				}
-				objType = methodParts[0]
+
+			case *ast.StringLiteral:
+				objType = "String"
+			case *ast.IntegerLiteral:
+				objType = "Int"
+			case *ast.BooleanLiteral:
+				objType = "Bool"
 			default:
 				return nil, block, fmt.Errorf("unsupported dispatch object type: %T", e.Object)
 			}
