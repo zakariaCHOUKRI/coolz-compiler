@@ -51,7 +51,7 @@ Compile to executable;
 clang -o name output.ll
 ```
 
-The previous command doesn't work on my machine (Windows 10 + visual studio dependencies) so instead I use this one, so in case it doesn't work for you too try this one, and if it also does not work then try to fix clang (the problem is not from the compiler because it generates a ir code that the user has to transform to machine code depending on their machine using clang or other)
+The command `clang -o name output.ll` works on my linux (kali) machine and i think it should work on most machines (i haven't tried on mac but i think it should work) but doesn't work on my windows machine (Windows 10 + visual studio dependencies) so instead I use this one, so in case it doesn't work for you too try this one, and if it also does not work then try to fix clang (the problem is not from the compiler because it generates a ir code that is machine independent that the user has to transform to machine code depending on their machine using clang or other)
 ```sh
 clang-cl output.ll /Fe:name.exe /MD /link /subsystem:console libucrt.lib libcmt.lib legacy_stdio_definitions.lib advapi32.lib shell32.lib user32.lib kernel32.lib msvcrt.lib
 ```
