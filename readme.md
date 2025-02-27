@@ -222,6 +222,9 @@ Demonstrates method overriding and polymorphism with various animal classes.
 ### [example_module.cl](examples/example_module.cl)
 Shows the usage of the module system with the `import` statement.
 
+### [example_primes.cl](examples/example_primes.cl)
+Shows the usage of multiple cool language constructs (loops, conditions, methods) to generate prime numbers.
+
 ---
 
 <div align="center">
