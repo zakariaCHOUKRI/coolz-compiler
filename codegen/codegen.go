@@ -232,6 +232,14 @@ func (cg *CodeGenerator) Generate(program *ast.Program) (*ir.Module, error) {
 	cg.classParents["String"] = "Object" // String inherits from Object
 	cg.methods["String"] = make(map[string]*ir.Func)
 
+	// Add String's type_name method that returns "String"
+	stringTypeNameFunc := cg.module.NewFunc("String_type_name", types.NewPointer(types.I8),
+		ir.NewParam("self", types.NewPointer(types.I8)))
+	block = stringTypeNameFunc.NewBlock("")
+	stringTypeStr := cg.getStringConstant("String")
+	block.NewRet(stringTypeStr)
+	cg.methods["String"]["type_name"] = stringTypeNameFunc
+
 	// Create length() method
 	lengthFunc := cg.module.NewFunc("String_length", types.I64,
 		ir.NewParam("self", types.NewPointer(types.I8)))
@@ -728,13 +736,46 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 
 			case *ast.StringLiteral:
 				objType = "String"
+				objValue = cg.getStringConstant(obj.Value)
+				// String literals should use String's methods
+				if method, exists := cg.methods["String"][methodName]; exists {
+					result := block.NewCall(method, objValue)
+					return result, block, nil
+				}
 			case *ast.IntegerLiteral:
 				objType = "Int"
+				// For integer literals, call Int's type_name
+				if methodName == "type_name" {
+					method := cg.methods["Int"]["type_name"]
+					result := block.NewCall(method, objValue)
+					return result, block, nil
+				}
 			case *ast.BooleanLiteral:
 				objType = "Bool"
+				// For boolean literals, call Bool's type_name
+				if methodName == "type_name" {
+					method := cg.methods["Bool"]["type_name"]
+					result := block.NewCall(method, objValue)
+					return result, block, nil
+				}
 			default:
 				return nil, block, fmt.Errorf("unsupported dispatch object type: %T", e.Object)
 			}
+		}
+
+		// Special handling for type_name dispatch
+		if methodName == "type_name" {
+			// First try to use the actual type's type_name method
+			if typeMethods, exists := cg.methods[objType]; exists {
+				if method, exists := typeMethods["type_name"]; exists {
+					result := block.NewCall(method, objValue)
+					return result, block, nil
+				}
+			}
+			// Fallback to Object's type_name if not found
+			method := cg.methods["Object"]["type_name"]
+			result := block.NewCall(method, objValue)
+			return result, block, nil
 		}
 
 		// Now generate the method call with the correct object and type
