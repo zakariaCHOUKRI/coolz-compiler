@@ -54,8 +54,9 @@ type Class struct {
 func (c *Class) TokenLiteral() string { return c.Token.Literal }
 
 type Formal struct {
-	Name *ObjectIdentifier
-	Type *TypeIdentifier
+	Token lexer.Token // Add this field
+	Name  *ObjectIdentifier
+	Type  *TypeIdentifier
 }
 
 func (f *Formal) TokenLiteral() string { return f.Name.Value }
