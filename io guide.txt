@@ -1,9 +1,0 @@
-The IO class provides the following methods for performing simple input and output operations:
-out_string(x : String) : SELF_TYPE
-out_int(x : Int) : SELF_TYPE
-in_string() : String
-in_int() : Int
-
-The methods out string and out int print their argument and return their self parameter. The method in string reads a string from the standard input, up to but not including a newline character.
-The method in int reads a single integer, which may be preceded by whitespace. Any characters following the integer, up to and including the next newline, are discarded by in int.
-A class can make use of the methods in the IO class by inheriting from IO. It is an error to redefine the IO class.
