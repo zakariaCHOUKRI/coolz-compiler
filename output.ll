@@ -6,13 +6,23 @@
 @str.5 = global [4 x i8] c"%*c\00"
 @str.6 = global [7 x i8] c"String\00"
 @str.7 = global [28 x i8] c"Error: substr out of range\0A\00"
-@str.8 = global [4 x i8] c"GCD\00"
-@str.9 = global [5 x i8] c"Main\00"
-@str.10 = global [15 x i8] c"gcd(15, 35) = \00"
-@str.11 = global [2 x i8] c"\0A\00"
-@str.12 = global [14 x i8] c"gcd(7, 49) = \00"
-@str.13 = global [14 x i8] c"gcd(7, 39) = \00"
-@str.14 = global [14 x i8] c"gcd(0, 39) = \00"
+@str.8 = global [8 x i8] c"Printer\00"
+@str.9 = global [2 x i8] c"\0A\00"
+@str.10 = global [5 x i8] c"Main\00"
+@str.11 = global [15 x i8] c"Hello everyone\00"
+@str.12 = global [21 x i8] c"testing length() ...\00"
+@str.13 = global [15 x i8] c"the length of:\00"
+@str.14 = global [2 x i8] c"\22\00"
+@str.15 = global [3 x i8] c"\22 \00"
+@str.16 = global [5 x i8] c"is: \00"
+@str.17 = global [1 x i8] c"\00"
+@str.18 = global [11 x i8] c"0123456789\00"
+@str.19 = global [21 x i8] c"testing substr() ...\00"
+@str.20 = global [59 x i8] c"substring index from 3 to 7 of the string \220123456789\22 is:\00"
+@str.21 = global [21 x i8] c"testing concat() ...\00"
+@str.22 = global [26 x i8] c"Please input a string a: \00"
+@str.23 = global [26 x i8] c"Please input a string b: \00"
+@str.24 = global [34 x i8] c"The concatenation of a and b is: \00"
 
 declare i32 @printf(i8* %format, ...)
 
@@ -134,87 +144,82 @@ define i8* @String_concat(i8* %self, i8* %s) {
 	ret i8* %5
 }
 
-define i64 @GCD_gcd(i8* %self, i64 %a, i64 %b) {
+define i8* @Printer_print(i8* %self, i8* %x) {
 0:
 	%1 = bitcast i8* %self to { i8*, i8*, i8* }*
-	%2 = alloca i64
-	store i64 %a, i64* %2
-	%3 = alloca i64
-	store i64 %b, i64* %3
-	%4 = load i64, i64* %2
-	%5 = load i64, i64* %3
-	%6 = icmp eq i64 %4, %5
-	br i1 %6, label %if_then_1, label %if_else_1
+	%2 = alloca i8*
+	store i8* %x, i8** %2
+	%3 = load i8*, i8** %2
+	%4 = call i8* @IO_out_string(i8* %self, i8* %3)
+	ret i8* %4
+}
 
-if_then_1:
-	%7 = load i64, i64* %2
-	br label %if_merge_1
-
-if_else_1:
-	%8 = load i64, i64* %2
-	%9 = load i64, i64* %3
-	%10 = icmp slt i64 %8, %9
-	br i1 %10, label %if_then_2, label %if_else_2
-
-if_merge_1:
-	%11 = phi i64 [ %7, %if_then_1 ], [ %20, %if_merge_2 ]
-	ret i64 %11
-
-if_then_2:
-	%12 = load i64, i64* %3
-	%13 = load i64, i64* %2
-	%14 = call i64 @GCD_gcd(i8* %self, i64 %12, i64 %13)
-	br label %if_merge_2
-
-if_else_2:
-	%15 = load i64, i64* %3
-	%16 = load i64, i64* %2
-	%17 = load i64, i64* %3
-	%18 = sub i64 %16, %17
-	%19 = call i64 @GCD_gcd(i8* %self, i64 %15, i64 %18)
-	br label %if_merge_2
-
-if_merge_2:
-	%20 = phi i64 [ %14, %if_then_2 ], [ %19, %if_else_2 ]
-	br label %if_merge_1
+define i8* @Printer_println(i8* %self, i8* %x) {
+0:
+	%1 = bitcast i8* %self to { i8*, i8*, i8* }*
+	%2 = alloca i8*
+	store i8* %x, i8** %2
+	%3 = load i8*, i8** %2
+	%4 = call i8* @Printer_print(i8* %self, i8* %3)
+	%5 = call i8* @Printer_print(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.9, i32 0, i32 0))
+	ret i8* %5
 }
 
 define i8* @Main_main(i8* %self) {
 0:
-	%1 = bitcast i8* %self to { i8*, i8*, i8* }*
+	%1 = bitcast i8* %self to { i8*, i8*, i8*, i8* }*
 	%2 = alloca i8*
-	store i8* null, i8** %2
-	%3 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([15 x i8], [15 x i8]* @str.10, i32 0, i32 0))
-	%4 = load i8*, i8** %2
-	%5 = call i64 @GCD_gcd(i8* %4, i64 15, i64 35)
-	%6 = call i8* @IO_out_int(i8* %self, i64 %5)
-	%7 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.11, i32 0, i32 0))
-	%8 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([14 x i8], [14 x i8]* @str.12, i32 0, i32 0))
-	%9 = load i8*, i8** %2
-	%10 = call i64 @GCD_gcd(i8* %9, i64 7, i64 49)
-	%11 = call i8* @IO_out_int(i8* %self, i64 %10)
-	%12 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.11)
-	%13 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([14 x i8], [14 x i8]* @str.13, i32 0, i32 0))
-	%14 = load i8*, i8** %2
-	%15 = call i64 @GCD_gcd(i8* %14, i64 7, i64 39)
-	%16 = call i8* @IO_out_int(i8* %self, i64 %15)
-	%17 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.11)
-	%18 = call i8* @IO_out_string(i8* %self, i8* getelementptr ([14 x i8], [14 x i8]* @str.14, i32 0, i32 0))
-	%19 = load i8*, i8** %2
-	%20 = call i64 @GCD_gcd(i8* %19, i64 0, i64 39)
-	%21 = call i8* @IO_out_int(i8* %self, i64 %20)
-	%22 = call i8* @IO_out_string(i8* %self, [2 x i8]* @str.11)
-	ret i8* %22
+	store i8* getelementptr ([15 x i8], [15 x i8]* @str.11, i32 0, i32 0), i8** %2
+	%3 = call i8* @Printer_println(i8* %self, i8* getelementptr ([21 x i8], [21 x i8]* @str.12, i32 0, i32 0))
+	%4 = call i8* @Printer_println(i8* %self, i8* getelementptr ([15 x i8], [15 x i8]* @str.13, i32 0, i32 0))
+	%5 = call i8* @Printer_print(i8* %self, i8* getelementptr ([2 x i8], [2 x i8]* @str.14, i32 0, i32 0))
+	%6 = load i8*, i8** %2
+	%7 = call i8* @Printer_print(i8* %self, i8* %6)
+	%8 = call i8* @Printer_print(i8* %self, i8* getelementptr ([3 x i8], [3 x i8]* @str.15, i32 0, i32 0))
+	%9 = call i8* @Printer_print(i8* %self, i8* getelementptr ([5 x i8], [5 x i8]* @str.16, i32 0, i32 0))
+	%10 = load i8*, i8** %2
+	%11 = call i64 @String_length(i8* %10)
+	%12 = call i8* @IO_out_int(i8* %self, i64 %11)
+	%13 = call i8* @Printer_println(i8* %self, i8* getelementptr ([1 x i8], [1 x i8]* @str.17, i32 0, i32 0))
+	%14 = call i8* @Printer_println(i8* %self, [1 x i8]* @str.17)
+	%15 = alloca i8*
+	store i8* getelementptr ([11 x i8], [11 x i8]* @str.18, i32 0, i32 0), i8** %15
+	%16 = call i8* @Printer_println(i8* %self, i8* getelementptr ([21 x i8], [21 x i8]* @str.19, i32 0, i32 0))
+	%17 = call i8* @Printer_println(i8* %self, i8* getelementptr ([59 x i8], [59 x i8]* @str.20, i32 0, i32 0))
+	%18 = load i8*, i8** %15
+	%19 = sub i64 7, 3
+	%20 = add i64 %19, 1
+	%21 = call i8* @String_substr(i8* %18, i64 3, i64 %20)
+	%22 = call i8* @Printer_println(i8* %self, i8* %21)
+	%23 = call i8* @Printer_println(i8* %self, [1 x i8]* @str.17)
+	%24 = call i8* @Printer_println(i8* %self, i8* getelementptr ([21 x i8], [21 x i8]* @str.21, i32 0, i32 0))
+	%25 = call i8* @Printer_print(i8* %self, i8* getelementptr ([26 x i8], [26 x i8]* @str.22, i32 0, i32 0))
+	%26 = alloca i8*
+	%27 = call i8* @IO_in_string(i8* %self)
+	store i8* %27, i8** %26
+	%28 = call i8* @Printer_print(i8* %self, i8* getelementptr ([26 x i8], [26 x i8]* @str.23, i32 0, i32 0))
+	%29 = alloca i8*
+	%30 = call i8* @IO_in_string(i8* %self)
+	store i8* %30, i8** %29
+	%31 = alloca i8*
+	%32 = load i8*, i8** %26
+	%33 = load i8*, i8** %29
+	%34 = call i8* @String_concat(i8* %32, i8* %33)
+	store i8* %34, i8** %31
+	%35 = call i8* @Printer_println(i8* %self, i8* getelementptr ([34 x i8], [34 x i8]* @str.24, i32 0, i32 0))
+	%36 = load i8*, i8** %31
+	%37 = call i8* @Printer_println(i8* %self, i8* %36)
+	ret i8* %37
 }
 
-define i8* @GCD_type_name(i8* %self) {
+define i8* @Printer_type_name(i8* %self) {
 0:
-	ret i8* getelementptr ([4 x i8], [4 x i8]* @str.8, i32 0, i32 0)
+	ret i8* getelementptr ([8 x i8], [8 x i8]* @str.8, i32 0, i32 0)
 }
 
 define i8* @Main_type_name(i8* %self) {
 0:
-	ret i8* getelementptr ([5 x i8], [5 x i8]* @str.9, i32 0, i32 0)
+	ret i8* getelementptr ([5 x i8], [5 x i8]* @str.10, i32 0, i32 0)
 }
 
 define i32 @main() {

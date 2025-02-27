@@ -899,10 +899,21 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		}
 		elseBlock.NewBr(mergeBlock)
 
-		// Check that types are compatible according to COOL's type system.
-		if !types.Equal(thenValue.Type(), elseValue.Type()) {
-			return nil, block, fmt.Errorf("type mismatch in if expression: then=%v else=%v",
-				thenValue.Type(), elseValue.Type())
+		// Convert types to match if needed
+		if types.Equal(thenValue.Type(), types.I64) && types.Equal(elseValue.Type(), types.NewPointer(types.I8)) {
+			// Convert integer to pointer
+			thenValue = thenBlock.NewIntToPtr(thenValue, types.NewPointer(types.I8))
+		} else if types.Equal(thenValue.Type(), types.NewPointer(types.I8)) && types.Equal(elseValue.Type(), types.I64) {
+			// Convert integer to pointer
+			elseValue = elseBlock.NewIntToPtr(elseValue, types.NewPointer(types.I8))
+		} else if !types.Equal(thenValue.Type(), elseValue.Type()) {
+			// If types don't match and we can't convert, both should be generic Object pointers
+			if !types.Equal(thenValue.Type(), types.NewPointer(types.I8)) {
+				thenValue = thenBlock.NewBitCast(thenValue, types.NewPointer(types.I8))
+			}
+			if !types.Equal(elseValue.Type(), types.NewPointer(types.I8)) {
+				elseValue = elseBlock.NewBitCast(elseValue, types.NewPointer(types.I8))
+			}
 		}
 
 		// Create PHI node in merge block.
@@ -963,6 +974,98 @@ func (cg *CodeGenerator) generateExpression(block *ir.Block, expr ast.Expression
 		// Placeholder for new object creation
 		newObj := constant.NewNull(types.NewPointer(types.I8))
 		return newObj, block, nil
+	case *ast.CaseExpression:
+		// First evaluate the test expression
+		testValue, block, err := cg.generateExpression(block, e.Expr) // Changed from e.Test to e.Expr
+		if err != nil {
+			return nil, block, err
+		}
+
+		// Generate merge block where all branches will converge
+		cg.blockCounter++
+		mergeBlock := cg.currentFunc.NewBlock(fmt.Sprintf("case_merge_%d", cg.blockCounter))
+
+		// Create blocks for each branch
+		var branchBlocks []*ir.Block
+		var branchTypes []string
+		var branchValues []value.Value
+
+		// Create blocks for all branches
+		for range e.Branches { // Changed from e.Cases to e.Branches
+			branchBlock := cg.currentFunc.NewBlock(fmt.Sprintf("case_branch_%d", cg.blockCounter))
+			branchBlocks = append(branchBlocks, branchBlock)
+		}
+
+		// Generate code for each branch
+		for i, branch := range e.Branches { // Changed from e.Cases to e.Branches
+			branchBlock := branchBlocks[i]
+			branchTypes = append(branchTypes, branch.Type.Value)
+
+			// Create binding for the case variable
+			prevBindings := cg.currentBindings
+			prevTypes := cg.currentTypes
+			cg.currentBindings = make(map[string]value.Value)
+			cg.currentTypes = make(map[string]string)
+			for k, v := range prevBindings {
+				cg.currentBindings[k] = v
+			}
+			for k, v := range prevTypes {
+				cg.currentTypes[k] = v
+			}
+
+			// Bind the case variable
+			varAlloca := branchBlock.NewAlloca(testValue.Type())
+			branchBlock.NewStore(testValue, varAlloca)
+			cg.currentBindings[branch.Identifier.Value] = varAlloca
+			cg.currentTypes[branch.Identifier.Value] = branch.Type.Value
+
+			// Generate the branch expression
+			branchValue, newBranchBlock, err := cg.generateExpression(branchBlock, branch.Expr) // Changed from branch.Body to branch.Expr
+			if err != nil {
+				return nil, block, err
+			}
+
+			// Add branch to merge block
+			newBranchBlock.NewBr(mergeBlock)
+			branchValues = append(branchValues, branchValue)
+
+			// Restore bindings
+			cg.currentBindings = prevBindings
+			cg.currentTypes = prevTypes
+		}
+
+		// Create a series of type checks
+		nextBlock := block
+		for i := 0; i < len(e.Branches); i++ { // Changed from e.Cases to e.Branches
+			// For now, we'll just branch to each case block in order
+			// In a real implementation, you would need to check the actual types
+			// and implement the least-type selection logic
+			if i < len(e.Branches)-1 { // Changed from e.Cases to e.Branches
+				nextCondBlock := cg.currentFunc.NewBlock(fmt.Sprintf("case_cond_%d", cg.blockCounter))
+				nextBlock.NewBr(branchBlocks[i])
+				nextBlock = nextCondBlock
+			} else {
+				// Last case branches directly
+				nextBlock.NewBr(branchBlocks[i])
+			}
+		}
+
+		// Create PHI node in merge block to collect all possible results
+		if len(branchValues) > 0 {
+			incomingVals := make([]*ir.Incoming, len(branchValues))
+			for i := range branchValues {
+				incomingVals[i] = &ir.Incoming{
+					X:    branchValues[i],
+					Pred: branchBlocks[i],
+				}
+			}
+			phi := mergeBlock.NewPhi(incomingVals[0])
+			phi.Incs = incomingVals
+			return phi, mergeBlock, nil
+		}
+
+		return constant.NewNull(types.NewPointer(types.I8)), mergeBlock, nil
+
 	default:
 		return nil, block, fmt.Errorf("unsupported expression type: %T", expr)
 	}
