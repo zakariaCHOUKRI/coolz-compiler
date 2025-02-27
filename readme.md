@@ -19,14 +19,42 @@
 ||      ||   ||  || || ||   ||    |  ||   ||  ||       ||     
  '|...'  '|..|' .|| || ||.  ||...'  .||. .||.  '|...' .||.    
                             ||                                
-                           ''''                               
+                           ''''                                
 ```
 
-A modern COOL (Classroom Object Oriented Language) compiler implemented in Go with LLVM IR generation
+A COOL (Classroom Object Oriented Language) compiler implemented in Go with LLVM IR generation
 
 </div>
 
----
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Go (Golang)
+- Clang
+
+### Building
+
+```sh
+go build -o coolz main.go
+```
+
+### Usage
+
+Generate LLVM IR code:
+```sh
+./coolz -o output.ll input.cl
+```
+
+Compile to executable;
+```sh
+clang -o name output.ll
+```
+
+The previous command doesn't work on my machine (Windows 10 + visual studio dependencies) so instead I use this one, so in case it doesn't work for you too try this one, and if it also does not work then try to fix clang (the problem is not from the compiler because it generates a ir code that the user has to transform to machine code depending on their machine using clang or other)
+```sh
+clang-cl output.ll /Fe:name.exe /MD /link /subsystem:console libucrt.lib libcmt.lib legacy_stdio_definitions.lib advapi32.lib shell32.lib user32.lib kernel32.lib msvcrt.lib
+```
 
 ## 🌟 Features
 
@@ -108,23 +136,6 @@ import modulename;  // imports modulename.cl from the same directory
 4. **Main Class Handling**: The Main class from imported modules is automatically excluded to prevent multiple entry points
 5. **Circular Import Detection**: The system detects and prevents circular dependencies between modules
 
-#### Benefits
-
-- **Code Organization**: Allows splitting large programs into multiple files
-- **Code Reuse**: Common functionality can be shared across multiple programs
-- **Maintainability**: Easier to manage and update shared code
-- **Simplicity**: Simple syntax and intuitive behavior
-- **Compatibility**: Works with existing COOL tools as preprocessing happens before compilation
-- **Zero Runtime Overhead**: All resolution happens at compile time
-
-#### Limitations
-
-- **No Module Namespace**: Imported symbols are merged into the global namespace
-- **No Selective Imports**: Cannot import specific classes or methods
-- **No Version Control**: No built-in mechanism for managing module versions
-- **Simple Resolution**: Only searches in the current directory
-- **Limited Error Reporting**: Import errors are detected early but may not provide detailed context
-- **All-or-Nothing**: Cannot partially import a module
 
 #### Example Usage
 
@@ -179,43 +190,37 @@ class Main inherits IO{
 
 ```
 
-### Future Extension Plans
+## 📚 Examples
 
-- [ ] Add support for directory-based modules
-- [ ] Implement selective imports
-- [ ] Add module namespaces to prevent naming conflicts
-- [ ] Support for standard library modules
-- [ ] Better error reporting for module-related issues
+### [example_strings.cl](examples/example_strings.cl)
+Demonstrates string operations including `length()`, `substr()`, and `concat()`.
 
-## 🚀 Getting Started
+### [example_operators.cl](examples/example_operators.cl)
+Shows usage of various operators and tests Pratt parsing.
 
-### Prerequisites
+### [example_loop.cl](examples/example_loop.cl)
+Illustrates loop constructs with `while` loops.
 
-- Go (Golang)
-- Clang
+### [example_io.cl](examples/example_io.cl)
+Demonstrates input and output operations.
 
-### Building
+### [example_ifelse.cl](examples/example_ifelse.cl)
+Shows conditional statements with `if-then-else`.
 
-```sh
-go build -o coolz main.go
-```
+### [example_function.cl](examples/example_function.cl)
+Illustrates function definitions and recursive calls.
 
-### Usage
+### [example_classes.cl](examples/example_classes.cl)
+Demonstrates class inheritance, method overriding, and polymorphism. As well as the functions `copy()`, `type_name()`, and `abort()`.
 
-Generate LLVM IR code:
-```sh
-./coolz -o output.ll input.cl
-```
+### [example_chaining.cl](examples/example_chaining.cl)
+Shows method chaining with string operations.
 
-Compile to executable;
-```sh
-clang -o name output.ll
-```
+### [example_polymorphism.cl](examples/example_polymorphism.cl)
+Demonstrates method overriding and polymorphism with various animal classes.
 
-The previous command doesn't work on my machine (Windows 10 + visual studio dependencies) so instead I use this one, so in case it doesn't work for you too try this one, and if it also does not work then try to fix clang (the problem is not from the compiler because it generates a ir code that the user has to transform to machine code depending on their machine using clang or other)
-```sh
-clang-cl output.ll /Fe:name.exe /MD /link /subsystem:console libucrt.lib libcmt.lib legacy_stdio_definitions.lib advapi32.lib shell32.lib user32.lib kernel32.lib msvcrt.lib
-```
+### [example_module.cl](examples/example_module.cl)
+Shows the usage of the module system with the `import` statement.
 
 ---
 
