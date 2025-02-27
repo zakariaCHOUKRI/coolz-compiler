@@ -89,6 +89,104 @@ A modern COOL (Classroom Object Oriented Language) compiler implemented in Go wi
   - Int and Bool with proper operations
 - Expression generation for all COOL features
 
+## 🔌 Extensions
+
+### Module System
+
+The COOLZ compiler implements a simple but effective module system through a preprocessing approach. This extension allows for better code organization and reusability while maintaining compatibility with the standard COOL language specification.
+
+#### Syntax
+```cool
+import modulename;  // imports modulename.cl from the same directory
+```
+
+#### How it Works
+
+1. **Preprocessing Stage**: Before lexical analysis, the compiler processes import statements recursively
+2. **File Resolution**: Imported files are looked up in the same directory as the importing file
+3. **Content Merging**: The preprocessor replaces each import statement with the content of the referenced file
+4. **Main Class Handling**: The Main class from imported modules is automatically excluded to prevent multiple entry points
+5. **Circular Import Detection**: The system detects and prevents circular dependencies between modules
+
+#### Benefits
+
+- **Code Organization**: Allows splitting large programs into multiple files
+- **Code Reuse**: Common functionality can be shared across multiple programs
+- **Maintainability**: Easier to manage and update shared code
+- **Simplicity**: Simple syntax and intuitive behavior
+- **Compatibility**: Works with existing COOL tools as preprocessing happens before compilation
+- **Zero Runtime Overhead**: All resolution happens at compile time
+
+#### Limitations
+
+- **No Module Namespace**: Imported symbols are merged into the global namespace
+- **No Selective Imports**: Cannot import specific classes or methods
+- **No Version Control**: No built-in mechanism for managing module versions
+- **Simple Resolution**: Only searches in the current directory
+- **Limited Error Reporting**: Import errors are detected early but may not provide detailed context
+- **All-or-Nothing**: Cannot partially import a module
+
+#### Example Usage
+
+math.cl:
+```cool
+class Main inherits IO{
+    main(): Object {
+        {
+            out_string("Math module loaded.\n");
+        }
+    };
+};
+
+class GCD inherits IO{
+    gcd(a: Int, b: Int) : Int{
+        {
+            if a = b then
+                a
+            else if a < b then 
+                    gcd(b, a)
+                 else gcd(b, a-b)
+                 fi
+            fi;
+        }
+    };
+};
+
+```
+
+main.cl:
+```cool
+import math;
+
+class Main inherits IO{
+    main(): Object {
+        let solver: GCD <- new GCD
+        in {
+            out_string("gcd(15, 35) = ");
+            out_int(solver.gcd(15, 35));
+            out_string("\n");
+
+            out_string("gcd(7, 49) = ");
+            out_int(solver.gcd(7, 49));
+            out_string("\n");
+
+            out_string("gcd(7, 39) = ");
+            out_int(solver.gcd(7, 39));
+            out_string("\n");
+        }
+    };
+};
+
+```
+
+### Future Extension Plans
+
+- [ ] Add support for directory-based modules
+- [ ] Implement selective imports
+- [ ] Add module namespaces to prevent naming conflicts
+- [ ] Support for standard library modules
+- [ ] Better error reporting for module-related issues
+
 ## 🚀 Getting Started
 
 ### Prerequisites

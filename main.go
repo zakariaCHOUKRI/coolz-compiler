@@ -4,6 +4,7 @@ import (
 	"coolz-compiler/codegen"
 	"coolz-compiler/lexer"
 	"coolz-compiler/parser"
+	"coolz-compiler/preprocessor"
 	"flag"
 	"fmt"
 	"os"
@@ -85,9 +86,20 @@ func main() {
 	defer file.Close()
 	printSuccess("Input file loaded successfully")
 
+	// Preprocess imports
+	printStep("PREPROCESSING", colorBlue)
+	prep := preprocessor.New()
+	processedContent, err := prep.ProcessFile(args[0])
+	if err != nil {
+		printError("Preprocessing failed")
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	printSuccess("Imports processed successfully")
+
 	// Lexing
 	printStep("LEXICAL ANALYSIS", colorPurple)
-	l := lexer.NewLexer(file)
+	l := lexer.NewLexer(strings.NewReader(processedContent))
 	printSuccess("Tokens generated successfully")
 
 	// Parsing
