@@ -190,6 +190,15 @@ class Main inherits IO{
 
 ```
 
+## 📝 Tests
+This project was done using TDD (test driven development) and every layer of it was tested and stress tested to avoid any problems.
+You can look at the tests for each layer in the corresponding directories.
+And you can run them yourself by using the command:
+```bash
+go test <directory_name> [-v]
+```
+with directory name the name of the compiler layer and the -v flag if you want verbose details about the tests.
+
 ## 📚 Examples
 
 ### [example_strings.cl](examples/example_strings.cl)
